@@ -1,0 +1,66 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "AZURE_TRUSTED_SIGNING_SUBJECT_DN",
+    "PORT",
+    "VITE_WS_URL",
+    "VITE_PROFILES_PUBLIC_ORIGIN",
+    "VITE_DEV_SERVER_URL",
+    "ELECTRON_RENDERER_PORT",
+    "IISHKO_HOME",
+    "IISHKO_DESKTOP_WS_URL",
+    "IISHKO_BROWSER_HOST_PIPE_PATH",
+    "IISHKO_BROWSER_USE_PIPE_PATH",
+    "IISHKO_BROWSER_PERF",
+    "IISHKO_PROVIDER_RUNTIME_IDLE_STOP_MS",
+    "IISHKO_GROK_ACP_DEBUG",
+    "IISHKO_WEB_SOURCEMAP",
+    "IISHKO_DEV_REACT_COMPILER",
+    "IISHKO_SERVER_SOURCEMAP",
+    "IISHKO_DESKTOP_SOURCEMAP",
+    "IISHKO_MODE",
+    "IISHKO_PORT",
+    "IISHKO_NO_BROWSER",
+    "IISHKO_AUTH_TOKEN",
+    "IISHKO_PUBLIC_URL",
+    "IISHKO_ALLOW_INSECURE_REMOTE",
+    "IISHKO_LOG_WS_EVENTS",
+    "IISHKO_HOST",
+    "IISHKO_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+    "IISHKO_ACCOUNT_URL",
+    "IISHKO_ACCOUNT_PROFILE_SYNC"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "dist-electron/**"]
+    },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": [],
+      "cache": false
+    },
+    "typecheck:native": {
+      "dependsOn": ["^typecheck:native"],
+      "outputs": [],
+      "cache": false
+    },
+    "typecheck:legacy": {
+      "dependsOn": ["^typecheck:legacy"],
+      "outputs": [],
+      "cache": false
+    },
+    "test": {
+      "cache": false,
+      "passThroughEnv": ["TEST_DATABASE_URL"],
+      "outputs": []
+    }
+  }
+}

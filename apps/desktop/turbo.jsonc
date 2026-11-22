@@ -1,0 +1,26 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "env": ["IISHKO_STABLE_ACCOUNT_URL"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/server/src/persistence/Migrations.ts"],
+      "outputs": ["dist-electron/**"],
+    },
+    "dev": {
+      "dependsOn": ["@iishko/cli#build"],
+      "persistent": true,
+    },
+    "start": {
+      "dependsOn": ["build", "@iishko/web#build", "@iishko/cli#build"],
+      "cache": false,
+      "persistent": true,
+    },
+    "smoke-test": {
+      "dependsOn": ["build", "@iishko/web#build", "@iishko/cli#build"],
+      "cache": false,
+      "outputs": [],
+    },
+  },
+}
