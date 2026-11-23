@@ -970,6 +970,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     },
     forceCodeSigning: signed,
   };
+  if (platform === "win") {
+    // Every native dependency ships a Windows prebuild (node-pty bundles
+    // prebuilds/, msgpackr-extract resolves its @msgpackr-extract/*-win32-*
+    // optional packages), so @electron/rebuild has nothing to compile — and
+    // fails outright on hosts whose VS install node-gyp cannot detect.
+    buildConfig.npmRebuild = false;
+  }
   const publishConfig = resolveGitHubPublishConfig();
   if (artifactIdentity.identity.usesScriptedUpdates) {
     // Experimental bundles must never contain a Stable updater feed, even

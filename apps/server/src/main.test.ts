@@ -794,7 +794,7 @@ it.layer(testLayer)("server CLI command", (it) => {
 
       assert.equal(start.mock.calls.length, 0);
       assert.equal(resolvedConfig, null);
-      assert.match(String(error), /Refusing to bind Iishko to non-loopback host 0\.0\.0\.0/);
+      assert.match(String(error), /Refusing to bind IISHKO to non-loopback host 0\.0\.0\.0/);
     }),
   );
 

@@ -51,11 +51,13 @@ async function piProfiles(settings: ServerSettings, binDir: string) {
   return profiles.filter((profile) => profile.instanceId === "pi");
 }
 
-it("treats a Pi instance without an explicit binary path as the bundled runtime", () => {
-  expect(usesBundledPi("pi", {})).toBe(true);
-  expect(usesBundledPi("pi", { binaryPath: "  " })).toBe(true);
-  expect(usesBundledPi("pi", { binaryPath: "C:/tools/pi.exe" })).toBe(false);
-  expect(usesBundledPi("claudeAgent", {})).toBe(false);
+it("treats the default Pi instance without an explicit binary path as the bundled runtime", () => {
+  expect(usesBundledPi("pi", {}, true)).toBe(true);
+  expect(usesBundledPi("pi", { binaryPath: "  " }, true)).toBe(true);
+  expect(usesBundledPi("pi", { binaryPath: "C:/tools/pi.exe" }, true)).toBe(false);
+  expect(usesBundledPi("claudeAgent", {}, true)).toBe(false);
+  // Custom Pi instances are CLI agents even without a binary path.
+  expect(usesBundledPi("pi", {}, false)).toBe(false);
 });
 
 it("derives no CLI profile for the bundled Pi even when a global pi is on PATH", async () => {

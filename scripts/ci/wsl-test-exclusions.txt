@@ -1,0 +1,3 @@
+# Proven-baseline test failures excluded from the WSL suite.
+# One repo-relative test-file path per line; keep this list minimal and
+# comment why each entry is excluded. Empty = full suite gates.

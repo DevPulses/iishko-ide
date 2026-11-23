@@ -7,6 +7,7 @@
 
 import {
   PROVIDER_DISPLAY_NAMES,
+  type ProviderInstanceConfigMap,
   type ProviderInstanceId,
   type ProviderKind,
   type ServerProviderStatus,
@@ -25,7 +26,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  buildProviderInstanceSettingsPatch,
   getProviderInstanceOptions,
+  removeManageableProviderInstance,
   type AppSettings,
   type AppSettingsBinding,
 } from "~/appSettings";
@@ -34,7 +37,7 @@ import { useProviderStatusesForLocalConfig } from "~/hooks/useProviderStatusesFo
 import { useRefreshProviderStatusesNow } from "~/hooks/useProviderStatusRefresh";
 import { useTranslation } from "~/i18n";
 import { pluralize } from "~/i18n/pluralize";
-import { Loader2Icon } from "~/lib/icons";
+import { Loader2Icon, PencilIcon, PlusIcon, TrashCanIcon } from "~/lib/icons";
 import { findUsableProviderStatus, providerStatusInstanceKey } from "~/lib/providerAvailability";
 import { providerSetupStatusLabel } from "~/lib/providerSetupStatus";
 import {
@@ -72,7 +75,23 @@ import {
   SettingsSection,
   SettingsSectionShell,
 } from "../SettingsPanelPrimitives";
+import { ProviderAccountAvatar } from "../../ProviderAccountMark";
+import { IconButton } from "../../ui/icon-button";
+import {
+  AlertDialog,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../../ui/alert-dialog";
 import { ProviderAgentRow } from "./ProviderAgentRow";
+import {
+  ProviderInstanceDialog,
+  type ProviderInstanceDialogTarget,
+  type ProviderInstanceFormValues,
+  type ProviderInstanceKind,
+} from "./ProviderInstanceDialog";
 import { ProviderSetupGuideButton } from "./ProviderDocsLinks";
 import {
   createClosedProviderInstallDisclosureState,
@@ -140,6 +159,12 @@ export function ProvidersSettingsPanel({
   const providerEnablementMutationInFlightRef = useRef(false);
   const [providerEnablementMutationPending, setProviderEnablementMutationPending] = useState(false);
   const [disabledProvidersOpen, setDisabledProvidersOpen] = useState(false);
+  const [instanceDialogOpen, setInstanceDialogOpen] = useState(false);
+  const [instanceDialogKind, setInstanceDialogKind] = useState<ProviderInstanceKind>("cli");
+  const [instanceDialogTarget, setInstanceDialogTarget] = useState<
+    ProviderInstanceDialogTarget | undefined
+  >(undefined);
+  const [instanceDeleteTarget, setInstanceDeleteTarget] = useState<string | null>(null);
   const hiddenProviderSet = useMemo(
     () => new Set<ProviderKind>(settings.hiddenProviders),
     [settings.hiddenProviders],
@@ -187,6 +212,23 @@ export function ProvidersSettingsPanel({
     [localProviderStatuses],
   );
   const configuredInstances = getProviderInstanceOptions(settings);
+  // Instances of a disabled provider kind are inert; they reappear with their
+  // saved state once the provider is re-enabled from the recovery list.
+  const visibleProviderInstances = configuredInstances.filter(
+    (instance) => !disabledProviderSet.has(instance.provider),
+  );
+  const providerInstanceIds = useMemo(
+    () =>
+      new Set([
+        ...configuredInstances.map((option) => String(option.instanceId)),
+        ...Object.keys(settings.providerInstances),
+      ]),
+    [configuredInstances, settings.providerInstances],
+  );
+  const providerInstanceById = useMemo(
+    () => new Map(configuredInstances.map((option) => [String(option.instanceId), option])),
+    [configuredInstances],
+  );
   const providerSetupStatusByProvider = new Map(
     enabledProviderOptions.map(
       ({ provider }) =>
@@ -402,6 +444,69 @@ export function ProvidersSettingsPanel({
     if (providerEnablementDirty) void updateProviderEnablement([...defaults.disabledProviders]);
   };
 
+  const openAddInstanceDialog = (kind: ProviderInstanceKind) => {
+    setInstanceDialogTarget(undefined);
+    setInstanceDialogKind(kind);
+    setInstanceDialogOpen(true);
+  };
+
+  const openEditInstanceDialog = (instanceId: string) => {
+    const option = providerInstanceById.get(instanceId);
+    if (!option) return;
+    const explicit = settings.providerInstances[instanceId];
+    const explicitConfig =
+      explicit?.config && typeof explicit.config === "object" && !Array.isArray(explicit.config)
+        ? (explicit.config as Record<string, unknown>)
+        : {};
+    setInstanceDialogTarget({
+      instanceId,
+      option,
+      config: explicitConfig,
+      environment: explicit?.environment,
+    });
+    setInstanceDialogOpen(true);
+  };
+
+  const saveProviderInstance = async (values: ProviderInstanceFormValues) => {
+    if (instanceDialogTarget) {
+      const patch = buildProviderInstanceSettingsPatch(settings, values.instanceId, {
+        displayName: values.displayName,
+        accentColor: values.accentColor ?? null,
+        config: values.config,
+        environment: values.environment,
+      });
+      if (patch) await updateSettingsAndWait(patch);
+    } else {
+      await updateSettingsAndWait({
+        providerInstances: {
+          ...settings.providerInstances,
+          [values.instanceId]: {
+            driver: values.driver,
+            ...(values.displayName ? { displayName: values.displayName } : {}),
+            ...(values.accentColor ? { accentColor: values.accentColor } : {}),
+            enabled: true,
+            ...(values.environment.length > 0 ? { environment: values.environment } : {}),
+            config: values.config,
+          },
+        } as ProviderInstanceConfigMap,
+      });
+    }
+    toastManager.add({ type: "success", title: t("settings:customProviders_saved") });
+  };
+
+  const setProviderInstanceEnabled = (instanceId: string, enabled: boolean) => {
+    const patch = buildProviderInstanceSettingsPatch(settings, instanceId, { enabled });
+    if (patch) updateSettings(patch);
+  };
+
+  const confirmDeleteProviderInstance = async () => {
+    const instanceId = instanceDeleteTarget;
+    setInstanceDeleteTarget(null);
+    if (!instanceId) return;
+    await updateSettingsAndWait(removeManageableProviderInstance(settings, instanceId));
+    toastManager.add({ type: "success", title: t("settings:customProviders_deleted") });
+  };
+
   return (
     <div className="space-y-6">
       <div id={SETTINGS_TARGETS.providerInstalls}>
@@ -511,6 +616,133 @@ export function ProvidersSettingsPanel({
           ) : null}
         </SettingsSectionShell>
       </div>
+
+      <SettingsSectionShell
+        id="setting-provider-instances"
+        title="settings:customProviders_title"
+        action={
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => openAddInstanceDialog("cli")}
+          >
+            <PlusIcon className="size-3.5" />
+            {t("settings:customProviders_addProvider")}
+          </Button>
+        }
+      >
+        <SettingsCard>
+          {visibleProviderInstances.length === 0 ? (
+            <p className={cn(SETTINGS_CARD_ROW_CLASS_NAME, "text-ui text-muted-foreground")}>
+              {t("settings:customProviders_empty")}
+            </p>
+          ) : (
+            visibleProviderInstances.map((instance) => {
+              const instanceId = String(instance.instanceId);
+              const explicitConfig = settings.providerInstances[instanceId]?.config;
+              const isOpenAiEndpoint =
+                explicitConfig !== null &&
+                typeof explicitConfig === "object" &&
+                !Array.isArray(explicitConfig) &&
+                (explicitConfig as Record<string, unknown>).kind === "openai-compatible";
+              return (
+                <SettingsListRow
+                  key={instanceId}
+                  leading={
+                    <ProviderAccountAvatar
+                      provider={instance.provider}
+                      accentColor={instance.accentColor}
+                    />
+                  }
+                  title={
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{instance.label}</span>
+                      {instance.isDefault ? (
+                        <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-ui-xs text-muted-foreground">
+                          {t("settings:customProviders_builtinHint")}
+                        </span>
+                      ) : null}
+                    </span>
+                  }
+                  description={`${PROVIDER_DISPLAY_NAMES[instance.provider]}${isOpenAiEndpoint ? ` · ${t("settings:customProviders_typeOpenAi")}` : ""}`}
+                  actions={
+                    <>
+                      <Switch
+                        checked={instance.enabled}
+                        onCheckedChange={(checked) =>
+                          setProviderInstanceEnabled(instanceId, Boolean(checked))
+                        }
+                        aria-label={t("workspace:enable", { value0: instance.label })}
+                      />
+                      <IconButton
+                        label={t("workspace:edit", { value0: instance.label })}
+                        onClick={() => openEditInstanceDialog(instanceId)}
+                      >
+                        <PencilIcon className="size-4" />
+                      </IconButton>
+                      {!instance.isDefault ? (
+                        <IconButton
+                          label={t("workspace:remove", { value0: instance.label })}
+                          onClick={() => setInstanceDeleteTarget(instanceId)}
+                        >
+                          <TrashCanIcon className="size-4" />
+                        </IconButton>
+                      ) : null}
+                    </>
+                  }
+                />
+              );
+            })
+          )}
+        </SettingsCard>
+      </SettingsSectionShell>
+
+      <ProviderInstanceDialog
+        open={instanceDialogOpen}
+        onOpenChange={(open) => {
+          setInstanceDialogOpen(open);
+          if (!open) setInstanceDialogTarget(undefined);
+        }}
+        settings={settings}
+        existingIds={providerInstanceIds}
+        target={instanceDialogTarget}
+        initialKind={instanceDialogKind}
+        onSave={(values) => void saveProviderInstance(values)}
+      />
+      <AlertDialog
+        open={instanceDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setInstanceDeleteTarget(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings:customProviders_deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings:customProviders_deleteDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setInstanceDeleteTarget(null)}
+            >
+              {t("common:form_cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => void confirmDeleteProviderInstance()}
+            >
+              {t("settings:customProviders_deleteConfirm")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
 
       <SettingsSection title="settings:performance">
         <SettingsRow

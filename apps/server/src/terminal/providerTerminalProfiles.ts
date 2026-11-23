@@ -93,22 +93,26 @@ function selectedProfileEnvironment(
 }
 
 /**
- * A Pi instance without an explicit binary path runs on the bundled SDK, which powers the
- * built-in IISHKO provider. It has no CLI, so no external `pi` may be resolved for it.
+ * The default Pi instance without an explicit binary path runs on the bundled
+ * SDK, which powers the built-in IISHKO provider. It has no CLI, so no external
+ * `pi` may be resolved for it. Custom Pi instances are CLI agents: without a
+ * binary path they resolve `pi` from PATH like every other CLI driver.
  */
 export function usesBundledPi(
   provider: ProviderKind,
   config: Readonly<Record<string, unknown>>,
+  isDefault: boolean,
 ): boolean {
-  return provider === "pi" && readConfigString(config, "binaryPath") === undefined;
+  return provider === "pi" && isDefault && readConfigString(config, "binaryPath") === undefined;
 }
 
 function binaryPathForProvider(
   provider: ProviderKind,
   config: Readonly<Record<string, unknown>>,
+  isDefault: boolean,
   baseEnv: NodeJS.ProcessEnv,
 ): string | null {
-  if (usesBundledPi(provider, config)) return null;
+  if (usesBundledPi(provider, config, isDefault)) return null;
   const configured = readConfigString(config, "binaryPath");
   return resolveExecutable(configured ?? PROVIDER_CLI_COMMAND_BY_KIND[provider], { env: baseEnv });
 }
@@ -134,7 +138,12 @@ export async function deriveManagedTerminalProfiles(input: {
       config: instance.config,
     });
     if (commandNames.has(commandName)) continue;
-    const targetPath = binaryPathForProvider(instance.driver, instance.config, input.baseEnv);
+    const targetPath = binaryPathForProvider(
+      instance.driver,
+      instance.config,
+      instance.isDefault,
+      input.baseEnv,
+    );
     if (!targetPath) continue;
 
     const configuredEnvironment = configuredProfileEnvironment(

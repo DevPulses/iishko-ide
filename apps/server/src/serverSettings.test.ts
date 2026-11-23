@@ -813,6 +813,46 @@ describe("ServerSettingsService", () => {
     });
   });
 
+  it("redacts a custom endpoint API key for clients while the server keeps it for routing", () => {
+    const settings: ServerSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        pi_myendpoint: {
+          driver: "pi",
+          displayName: "My endpoint",
+          enabled: true,
+          environment: [
+            { name: "IISHKO_CUSTOM_API_KEY", value: "sk-live-secret", sensitive: true },
+          ],
+          config: {
+            kind: "openai-compatible",
+            baseUrl: "https://api.example.com/v1",
+            models: [{ id: "model-a" }],
+          },
+        },
+      },
+    };
+
+    const clientView = redactServerSettingsForClient(settings);
+    expect(clientView.providerInstances.pi_myendpoint?.environment).toEqual([
+      { name: "IISHKO_CUSTOM_API_KEY", value: "", sensitive: true, valueRedacted: true },
+    ]);
+    expect(JSON.stringify(clientView)).not.toContain("sk-live-secret");
+
+    const instance = deriveProviderInstances(settings).find(
+      (entry) => entry.instanceId === "pi_myendpoint",
+    );
+    const startOptions = instance ? providerStartOptionsFromInstance(instance) : undefined;
+    expect(startOptions?.pi?.customProviders?.[0]).toMatchObject({
+      id: "custom-pi_myendpoint",
+      apiKeyEnv: "IISHKO_CUSTOM_API_KEY",
+      baseUrl: "https://api.example.com/v1",
+    });
+    expect(startOptions?.pi?.environment).toEqual({
+      IISHKO_CUSTOM_API_KEY: "sk-live-secret",
+    });
+  });
+
   it("preserves redacted provider-instance environment values on writeback", async () => {
     const settings = await Effect.runPromise(
       Effect.gen(function* () {

@@ -1230,8 +1230,7 @@ describe("wsNativeApi", () => {
     { body: "[]", status: 200 },
     { body: '{"text":null}', status: 200 },
     { body: '{"text":42}', status: 200 },
-    { body: '{"text":""}', status: 200 },
-    { body: '{"text":"   "}', status: 200 },
+    // Empty/blank text is a valid outcome (silent clip), not an invalid response.
     { body: "<html>Service unavailable</html>", status: 200 },
     { body: '"unexpected response"', status: 502 },
     { body: '{"error":"Upload rejected"}', status: 403 },

@@ -427,6 +427,8 @@ import type {
   ProviderListAgentsResult,
   ProviderListCommandsInput,
   ProviderListCommandsResult,
+  ProviderListEndpointModelsInput,
+  ProviderListEndpointModelsResult,
   ProviderListModelsInput,
   ProviderListModelsResult,
   ProviderListPluginsInput,
@@ -1514,6 +1516,9 @@ export interface NativeApi {
     listPlugins: (input: ProviderListPluginsInput) => Promise<ProviderListPluginsResult>;
     readPlugin: (input: ProviderReadPluginInput) => Promise<ProviderReadPluginResult>;
     listModels: (input: ProviderListModelsInput) => Promise<ProviderListModelsResult>;
+    listEndpointModels: (
+      input: ProviderListEndpointModelsInput,
+    ) => Promise<ProviderListEndpointModelsResult>;
     listAgents: (input: ProviderListAgentsInput) => Promise<ProviderListAgentsResult>;
   };
   orchestration: {

@@ -109,7 +109,7 @@ export async function resolveProviderAuthenticationLaunch(input: {
     (candidate) => candidate.instanceId === input.instanceId,
   );
   if (!instance?.enabled) throw new Error("This provider account is missing or disabled.");
-  if (usesBundledPi(instance.driver, instance.config)) {
+  if (usesBundledPi(instance.driver, instance.config, instance.isDefault)) {
     throw new Error("ИИШКО входит через аккаунт Telegram: откройте Настройки → Аккаунт ИИШКО.");
   }
   const profile = (

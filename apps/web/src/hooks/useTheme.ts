@@ -5,7 +5,10 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { readDesktopWindowTranslucency } from "../lib/desktopWindowTranslucency";
+import { toastManager } from "~/components/ui/toast";
+import { useTranslation } from "~/i18n";
 import {
+  consumeThemeFallbackNotice,
   DEFAULT_THEME_STATE,
   type ChromeTheme,
   type ThemeFonts,
@@ -21,6 +24,7 @@ import {
   canParseThemeShareString,
   createThemeShareString,
   parseStoredThemeState,
+  reportThemeFallback,
   resetThemeVariant as resetThemeVariantState,
   resolveThemePack,
   resolveProfileThemeAccent,
@@ -165,6 +169,22 @@ function applyThemeState(state: ThemeState, suppressTransitions = false) {
     return;
   }
 
+  try {
+    applyThemeStateInner(state, suppressTransitions);
+  } catch (error) {
+    // A theme that cannot be projected must never take the UI down with it:
+    // fall back to the default pack and let the notice path report it once.
+    console.error("[theme] Failed to apply the stored theme; falling back to default.", error);
+    reportThemeFallback();
+    try {
+      applyThemeStateInner(DEFAULT_THEME_STATE, false);
+    } catch {
+      // Even the default projection failed; leave the DOM untouched.
+    }
+  }
+}
+
+function applyThemeStateInner(state: ThemeState, suppressTransitions = false) {
   const root = document.documentElement;
   // Some server-rendered tests stub only the tiny DOM surface they need.
   if (
@@ -372,6 +392,20 @@ export function useTheme() {
   useEffect(() => {
     applyThemeState(snapshot.state);
   }, [snapshot.state]);
+
+  const { t } = useTranslation();
+  // A stored theme that failed to parse or project already fell back to the
+  // default pack; tell the user once instead of silently changing their theme.
+  useEffect(() => {
+    if (!consumeThemeFallbackNotice()) {
+      return;
+    }
+    toastManager.add({
+      type: "warning",
+      title: t("common:theme_fallback_title"),
+      description: t("common:theme_fallback_description"),
+    });
+  }, [t]);
 
   return {
     activeTheme,

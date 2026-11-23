@@ -169,6 +169,25 @@ it("exchanges a pasted key for a device session and never stores the raw key", a
   expect(await account.status()).toMatchObject({ state: "connected", source: "manual" });
 });
 
+it("keeps a user-selected model that is temporarily missing from the gateway list", async () => {
+  const initial: ServerSettings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    newThreadDefaults: {
+      ...DEFAULT_SERVER_SETTINGS.newThreadDefaults,
+      modelSelectionByProvider: {
+        ...DEFAULT_SERVER_SETTINGS.newThreadDefaults.modelSelectionByProvider,
+        pi: { provider: "pi", instanceId: "pi", model: "iishko/kimi-k3" },
+      },
+    },
+  };
+  const { account, settings } = harness(keyLoginRoute(), initial);
+  await account.connectApiKey({ apiKey: "sk-live-9999" });
+  // kimi-k3 is absent from MODELS; the selection must survive the credential write.
+  expect(settings().newThreadDefaults.modelSelectionByProvider.pi).toMatchObject({
+    model: "iishko/kimi-k3",
+  });
+});
+
 it("rejects an unknown key with the invalid-key error and stores nothing", async () => {
   const { account, settings } = harness((input) =>
     input.url === KEY_LOGIN_URL ? json(401, { error: "invalid_key" }) : json(404, {}),

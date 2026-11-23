@@ -4,7 +4,7 @@
 // Exports: ProviderInstanceId, ProviderDriverKind, config map schemas, helpers
 
 import { Schema, SchemaTransformation } from "effect";
-import { TrimmedNonEmptyString } from "./baseSchemas";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
 const PROVIDER_SLUG_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -75,6 +75,27 @@ export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
 
 export const ProviderInstanceConfigMap = Schema.Record(ProviderInstanceId, ProviderInstanceConfig);
 export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
+
+// One model of an OpenAI-compatible endpoint configured on a provider instance.
+export const ProviderCustomModelSpec = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: Schema.optional(TrimmedNonEmptyString),
+  contextWindow: Schema.optional(NonNegativeInt),
+});
+export type ProviderCustomModelSpec = typeof ProviderCustomModelSpec.Type;
+
+// Runtime descriptor for one custom OpenAI-compatible endpoint. `apiKeyEnv`
+// names the environment variable (resolved inside that instance's own
+// environment only) that carries the bearer key; the key itself never lives
+// in this spec.
+export const ProviderCustomEndpointSpec = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  baseUrl: TrimmedNonEmptyString,
+  models: Schema.Array(ProviderCustomModelSpec),
+  apiKeyEnv: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProviderCustomEndpointSpec = typeof ProviderCustomEndpointSpec.Type;
 
 // Legacy single-provider ids remain the default instance ids for migrations.
 export function defaultInstanceIdForDriver(driver: ProviderDriverKind): ProviderInstanceId {

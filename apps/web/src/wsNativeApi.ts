@@ -903,6 +903,7 @@ export function createWsNativeApi(): NativeApi {
       listPlugins: (input) => executionRequest(WS_METHODS.providerListPlugins, input),
       readPlugin: (input) => executionRequest(WS_METHODS.providerReadPlugin, input),
       listModels: (input) => executionRequest(WS_METHODS.providerListModels, input),
+      listEndpointModels: (input) => executionRequest(WS_METHODS.providerListEndpointModels, input),
       listAgents: (input) => executionRequest(WS_METHODS.providerListAgents, input),
     },
     orchestration: {

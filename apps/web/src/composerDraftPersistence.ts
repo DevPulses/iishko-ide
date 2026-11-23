@@ -22,6 +22,11 @@ import {
 import * as Schema from "effect/Schema";
 import type { DeepMutable } from "effect/Types";
 
+// Contract schema types are readonly; persisted drafts keep mutable JSON copies.
+const mutableProviderStartOptions = (
+  value: ProviderStartOptions,
+): DeepMutable<ProviderStartOptions> => value as DeepMutable<ProviderStartOptions>;
+
 import {
   hydrateImagesFromPersisted,
   normalizePersistedAttachment,
@@ -799,7 +804,9 @@ function normalizePersistedQueuedTurns(
         selectedModel,
         selectedPromptEffort,
         modelSelection,
-        ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+        ...(providerOptionsForDispatch
+          ? { providerOptionsForDispatch: mutableProviderStartOptions(providerOptionsForDispatch) }
+          : {}),
         enableComputerControl,
         computerControlMode,
         ...(computerControlGeneration !== undefined ? { computerControlGeneration } : {}),
@@ -831,7 +838,9 @@ function normalizePersistedQueuedTurns(
         selectedModel,
         selectedPromptEffort,
         modelSelection,
-        ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+        ...(providerOptionsForDispatch
+          ? { providerOptionsForDispatch: mutableProviderStartOptions(providerOptionsForDispatch) }
+          : {}),
         enableComputerControl,
         computerControlMode,
         ...(computerControlGeneration !== undefined ? { computerControlGeneration } : {}),
@@ -1183,7 +1192,9 @@ function normalizePersistedDraftsByThreadId(
         : {}),
       ...(restoredSourceProposedPlan ? { restoredSourceProposedPlan } : {}),
       ...(hasModelData ? { modelSelectionByProvider, activeProvider } : {}),
-      ...(providerOptionsForDispatch ? { providerOptionsForDispatch } : {}),
+      ...(providerOptionsForDispatch
+        ? { providerOptionsForDispatch: mutableProviderStartOptions(providerOptionsForDispatch) }
+        : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
       ...(enableComputerControl !== undefined ? { enableComputerControl } : {}),
@@ -1288,7 +1299,11 @@ export function partializeComposerDraftStoreState(
           selectedPromptEffort: queuedTurn.selectedPromptEffort,
           modelSelection: queuedTurn.modelSelection,
           ...(queuedTurn.providerOptionsForDispatch
-            ? { providerOptionsForDispatch: queuedTurn.providerOptionsForDispatch }
+            ? {
+                providerOptionsForDispatch: mutableProviderStartOptions(
+                  queuedTurn.providerOptionsForDispatch,
+                ),
+              }
             : {}),
           enableComputerControl:
             resolveComputerControlMode(
@@ -1323,7 +1338,11 @@ export function partializeComposerDraftStoreState(
         selectedPromptEffort: queuedTurn.selectedPromptEffort,
         modelSelection: queuedTurn.modelSelection,
         ...(queuedTurn.providerOptionsForDispatch
-          ? { providerOptionsForDispatch: queuedTurn.providerOptionsForDispatch }
+          ? {
+              providerOptionsForDispatch: mutableProviderStartOptions(
+                queuedTurn.providerOptionsForDispatch,
+              ),
+            }
           : {}),
         enableComputerControl:
           resolveComputerControlMode(
@@ -1519,7 +1538,11 @@ export function partializeComposerDraftStoreState(
           }
         : {}),
       ...(draft.providerOptionsForDispatch
-        ? { providerOptionsForDispatch: draft.providerOptionsForDispatch }
+        ? {
+            providerOptionsForDispatch: mutableProviderStartOptions(
+              draft.providerOptionsForDispatch,
+            ),
+          }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),

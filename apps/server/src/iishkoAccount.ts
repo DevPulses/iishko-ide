@@ -183,7 +183,10 @@ interface IishkoModelProbe {
 function modelProbe(item: Record<string, unknown> | undefined): IishkoModelProbe {
   if (!item) return {};
   const status = str(item.status, 20);
-  const reason = str(item.reason, 160);
+  // `str` rejects over-long values; a probe reason is free text, so keep its
+  // head truncated instead of dropping it entirely.
+  const rawReason = typeof item.reason === "string" ? item.reason.trim() : "";
+  const reason = rawReason ? rawReason.slice(0, 160) : undefined;
   const latencyMs = nonNegNum(item.ms);
   const checkedAt = nonNegNum(item.checked_at);
   const unstable = typeof item.unstable === "boolean" ? item.unstable : undefined;
@@ -414,12 +417,14 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
       ];
       const { environment: _previous, ...rest } = existing ?? { driver: "pi" as const };
       const selection = current.newThreadDefaults.modelSelectionByProvider[PI_INSTANCE_ID];
-      const slugs = modelIds.map((id) => `${IISHKO_PROVIDER_ID}/${id}`);
       const defaultId = pickIishkoDefaultModelId(modelIds);
       const preferred = defaultId ? `${IISHKO_PROVIDER_ID}/${defaultId}` : undefined;
       const signedIn = Boolean(credentials.apiKey || credentials.deviceToken);
+      // An existing selection is the user's choice: a model missing from the
+      // current gateway list (e.g. a temporary 503) must not silently replace
+      // it. The default is only seeded when nothing was ever selected.
       const selectionPatch: Record<string, unknown> | null | undefined =
-        signedIn && preferred && (!selection || !slugs.includes(selection.model))
+        signedIn && preferred && !selection
           ? { provider: "pi", instanceId: PI_INSTANCE_ID, model: preferred }
           : !signedIn && selection?.model.startsWith(`${IISHKO_PROVIDER_ID}/`)
             ? undefined

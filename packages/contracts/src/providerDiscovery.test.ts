@@ -33,3 +33,19 @@ describe("ProviderListModelsResult", () => {
     expect(() => decodeModels({ models: "invalid", roles: [] })).toThrow();
   });
 });
+
+describe("ProviderListEndpointModelsInput", () => {
+  it("accepts a base URL with optional key and instance, rejects an empty URL", async () => {
+    const { ProviderListEndpointModelsInput, ProviderListEndpointModelsResult } =
+      await import("./providerDiscovery");
+    const decode = Schema.decodeUnknownSync(ProviderListEndpointModelsInput);
+    expect(decode({ baseUrl: "https://api.example.com/v1" })).toEqual({
+      baseUrl: "https://api.example.com/v1",
+    });
+    expect(() => decode({ baseUrl: "  " })).toThrow();
+    const decodeResult = Schema.decodeUnknownSync(ProviderListEndpointModelsResult);
+    expect(decodeResult({ models: [{ id: "m1", name: "One", contextWindow: 32000 }] })).toEqual({
+      models: [{ id: "m1", name: "One", contextWindow: 32000 }],
+    });
+  });
+});

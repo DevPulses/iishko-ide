@@ -1594,7 +1594,7 @@ describe("codex CLI version gate", () => {
       writeBinary("0.1.0", "replaced-in-place-by-a-downgrade");
       await expect(
         assertSupportedCodexCliVersion({ binaryPath: "codex", cwd: dir, homePath }),
-      ).rejects.toThrow(/too old for Iishko/);
+      ).rejects.toThrow(/too old for IISHKO/);
     } finally {
       f.cleanup();
     }
@@ -1606,10 +1606,10 @@ describe("codex CLI version gate", () => {
     try {
       await expect(
         assertSupportedCodexCliVersion({ binaryPath, cwd: dir, homePath }),
-      ).rejects.toThrow(/too old for Iishko/);
+      ).rejects.toThrow(/too old for IISHKO/);
       await expect(
         assertSupportedCodexCliVersion({ binaryPath, cwd: dir, homePath }),
-      ).rejects.toThrow(/too old for Iishko/);
+      ).rejects.toThrow(/too old for IISHKO/);
       // Failures are re-probed so installing or upgrading Codex takes effect at once.
       expect(probeCount()).toBe(2);
     } finally {

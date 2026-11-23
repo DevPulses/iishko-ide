@@ -107,6 +107,76 @@ export function isBenchmarkIpAddress(address: string): boolean {
   return Net.isIP(address) === 4 && benchmarkAddresses.check(address, "ipv4");
 }
 
+// Loopback plus the private LAN ranges local model servers live on. Link-local
+// (169.254/16, fe80::/10), CGNAT, documentation, and multicast ranges stay out.
+const privateLanAddresses = new Net.BlockList();
+for (const [network, prefix] of [
+  ["10.0.0.0", 8],
+  ["172.16.0.0", 12],
+  ["192.168.0.0", 16],
+  ["127.0.0.0", 8],
+] as const) {
+  privateLanAddresses.addSubnet(network, prefix, "ipv4");
+}
+for (const [network, prefix] of [
+  ["::1", 128],
+  ["fc00::", 7],
+] as const) {
+  privateLanAddresses.addSubnet(network, prefix, "ipv6");
+}
+
+function embeddedIpv4OfMappedIpv6(address: string): string | undefined {
+  const lower = address.toLowerCase();
+  if (!lower.startsWith("::ffff:")) return undefined;
+  const rest = lower.slice("::ffff:".length);
+  if (Net.isIP(rest) === 4) return rest;
+  const parts = rest.split(":");
+  if (parts.length === 2 && parts.every((part) => /^[0-9a-f]{1,4}$/u.test(part))) {
+    const high = Number.parseInt(parts[0]!, 16);
+    const low = Number.parseInt(parts[1]!, 16);
+    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+  }
+  return undefined;
+}
+
+export function isLoopbackOrPrivateLanIpAddress(address: string): boolean {
+  const family = Net.isIP(address);
+  if (family === 4) return privateLanAddresses.check(address, "ipv4");
+  if (family === 6) {
+    const embedded = embeddedIpv4OfMappedIpv6(address);
+    if (embedded !== undefined) return privateLanAddresses.check(embedded, "ipv4");
+    return privateLanAddresses.check(address, "ipv6");
+  }
+  return false;
+}
+
+// Plain HTTP is only meaningful on loopback/LAN destinations. IP literals are
+// classified here; DNS names defer to the pinned-address assertion, which
+// re-checks every resolved address before connecting.
+function isPrivateLanHttpHostname(hostname: string): boolean {
+  const host =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  const family = Net.isIP(host);
+  if (family === 4 || family === 6) return isLoopbackOrPrivateLanIpAddress(host);
+  return true;
+}
+
+/**
+ * Address gate for user-configured endpoints (custom model servers): plain
+ * HTTP reaches only loopback/private-LAN addresses; HTTPS additionally
+ * reaches public addresses. Everything else stays rejected.
+ */
+export function assertPrivateLanEndpointAddress(address: string, protocol: string): void {
+  const privateLan = isLoopbackOrPrivateLanIpAddress(address);
+  const allowed = protocol === "http:" ? privateLan : privateLan || isPublicIpAddress(address);
+  if (!allowed) {
+    throw new OutboundPolicyError(
+      "private-address",
+      "Outbound destination resolved to a private, local, reserved, or invalid address.",
+    );
+  }
+}
+
 function isExactLoopbackHostname(hostname: string, allowIpv4Subnet = false): boolean {
   return (
     hostname === "localhost" ||
@@ -118,7 +188,10 @@ function isExactLoopbackHostname(hostname: string, allowIpv4Subnet = false): boo
 
 export function normalizeOutboundOrigin(
   value: string | URL,
-  options: { readonly allowLoopbackHttp?: boolean | "ipv4-subnet" } = {},
+  options: {
+    readonly allowLoopbackHttp?: boolean | "ipv4-subnet";
+    readonly allowPrivateLanAddresses?: boolean;
+  } = {},
 ): string {
   let url: URL;
   try {
@@ -130,7 +203,10 @@ export function normalizeOutboundOrigin(
     url.protocol === "https:" ||
     (Boolean(options.allowLoopbackHttp) &&
       url.protocol === "http:" &&
-      isExactLoopbackHostname(url.hostname, options.allowLoopbackHttp === "ipv4-subnet"));
+      isExactLoopbackHostname(url.hostname, options.allowLoopbackHttp === "ipv4-subnet")) ||
+    (options.allowPrivateLanAddresses === true &&
+      url.protocol === "http:" &&
+      isPrivateLanHttpHostname(url.hostname));
   if (!allowedProtocol || url.username || url.password) {
     throw new OutboundPolicyError(
       "invalid-url",
@@ -144,6 +220,7 @@ export function assertOutboundUrlAllowed(input: {
   readonly url: string | URL;
   readonly allowedOrigins: ReadonlySet<string> | ReadonlyArray<string>;
   readonly allowLoopbackHttp?: boolean | "ipv4-subnet";
+  readonly allowPrivateLanAddresses?: boolean;
 }): URL {
   let url: URL;
   try {
@@ -151,7 +228,10 @@ export function assertOutboundUrlAllowed(input: {
   } catch {
     throw new OutboundPolicyError("invalid-url", "Outbound destination is not a valid URL.");
   }
-  const options = { allowLoopbackHttp: input.allowLoopbackHttp ?? false };
+  const options = {
+    allowLoopbackHttp: input.allowLoopbackHttp ?? false,
+    allowPrivateLanAddresses: input.allowPrivateLanAddresses === true,
+  };
   const origin = normalizeOutboundOrigin(url, options);
   const allowedOrigins = new Set(
     Array.from(input.allowedOrigins, (allowedOrigin) =>

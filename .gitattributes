@@ -1,3 +1,8 @@
+# Text files are LF in the index and must stay LF in every working tree:
+# oxfmt --check and the WSL CI scripts fail on CRLF checkouts (Windows
+# core.autocrlf=true otherwise rewrites the whole tree).
+* text=auto eol=lf
+
 bun.lock text eol=lf
 .githooks/* text eol=lf
 # Patch checksums are pinned (cuaDriverRelease.json): keep LF on every checkout.

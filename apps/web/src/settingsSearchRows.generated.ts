@@ -169,6 +169,12 @@ export const GENERATED_SETTINGS_SEARCH_ROWS: readonly GeneratedSettingsSearchRow
     description: "settings:microphoneTheMessageTrailListensToPickABuilt",
   },
   {
+    target: "setting-interface-language",
+    section: "appearance",
+    title: "settings:interfaceLanguage",
+    description: "settings:interfaceLanguageDescription",
+  },
+  {
     target: "setting-app-icon",
     section: "appearance",
     title: "settings:appIcon",
@@ -179,6 +185,12 @@ export const GENERATED_SETTINGS_SEARCH_ROWS: readonly GeneratedSettingsSearchRow
     section: "appearance",
     title: "settings:useCustomTitleBar",
     description: "settings:replaceTheSystemTitleBarWithIishkoSFrameless",
+  },
+  {
+    target: "setting-motion-mode",
+    section: "appearance",
+    title: "settings:motionModeTitle",
+    description: "settings:motionModeDescription",
   },
   {
     target: "setting-ascii-background",

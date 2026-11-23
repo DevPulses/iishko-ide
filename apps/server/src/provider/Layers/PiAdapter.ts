@@ -23,6 +23,7 @@ import {
   EventId,
   type PiModelSelection,
   type ProviderComposerCapabilities,
+  type ProviderCustomEndpointSpec,
   type ProviderListCommandsResult,
   type ProviderListModelsResult,
   type ProviderListSkillsResult,
@@ -75,11 +76,11 @@ import {
   IISHKO_PROVIDER_ID,
   isIishkoUnauthorizedError,
   mapIishkoGatewayError,
-  pickIishkoDefaultModelId,
   refreshPiIishkoModels,
 } from "../iishkoProvider.ts";
 import { resolvePiInstallation, type PiPackageImporter } from "../piSdkImports.ts";
 import { createPiSubagentTool, discoverPiSubagents, runPiSubagentTask } from "../piSubagents.ts";
+import { registerPiCustomProviders } from "../piCustomProviders.ts";
 import { transcribeIishkoVoice } from "../iishkoVoice.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
@@ -1767,6 +1768,7 @@ export async function createPiModelRuntime(
   environment?: Readonly<Record<string, string>>,
   instanceId?: string,
   paths?: { readonly stateDir: string; readonly homeDir: string },
+  customProviders?: ReadonlyArray<ProviderCustomEndpointSpec>,
 ): Promise<ModelRuntime> {
   const hasAccountBoundary =
     environment !== undefined || (instanceId !== undefined && instanceId !== PROVIDER);
@@ -1837,6 +1839,13 @@ export async function createPiModelRuntime(
   await refreshPiIishkoModels(runtime, importPackage, {
     signal,
     environment: runtimeEnvironment,
+  });
+  await registerPiCustomProviders(runtime, importPackage, {
+    providers: customProviders ?? [],
+    // Only the owning instance's materialized environment — never the ambient
+    // process env that buildProviderProcessEnv layers underneath it.
+    environment: environment ?? {},
+    ...(signal ? { signal } : {}),
   });
   return runtime;
 }
@@ -3071,6 +3080,25 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               event.message.stopReason === "error" || event.message.stopReason === "aborted",
               { source: "pi.sdk.event", messageType: event.type, payload: event },
             );
+            // The gateway may answer with a different model than requested
+            // (aliasing, fallback routing). Surface it in the turn's work log
+            // instead of letting the reply look like it came from the selection.
+            const answeredModel = event.message.responseModel;
+            if (
+              typeof answeredModel === "string" &&
+              answeredModel.length > 0 &&
+              answeredModel !== event.message.model
+            ) {
+              offerRuntimeEvent({
+                ...makeEventBase(context),
+                type: "model.rerouted",
+                payload: {
+                  fromModel: `${event.message.provider}/${event.message.model}`,
+                  toModel: answeredModel,
+                  reason: "The provider answered with a different model than requested.",
+                },
+              } satisfies ProviderRuntimeEvent);
+            }
           }
           return;
         case "message_update":
@@ -3275,6 +3303,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       gatewayTools?: ReadonlyArray<ToolDefinition>;
       signal?: AbortSignal;
       noExtensions?: boolean;
+      customProviders?: ReadonlyArray<ProviderCustomEndpointSpec>;
     }) => {
       const modelRuntime = await createPiModelRuntime(
         input.agentDir,
@@ -3284,6 +3313,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         input.environment,
         input.instanceId,
         { stateDir: serverConfig.stateDir, homeDir: serverConfig.homeDir },
+        input.customProviders,
       );
       input.signal?.throwIfAborted();
       const createRuntime: CreateAgentSessionRuntimeFactory = async ({
@@ -3310,25 +3340,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           });
         }
         let model = findModelInRegistry(registry, input.modelId);
-        if (input.modelId && !model && requested?.provider === IISHKO_PROVIDER_ID) {
-          // The selected IISHKO model vanished (rank change, gateway catalog): use the first
-          // preferred model that is still listed, including one served from the stale cache.
-          const fallbackId = pickIishkoDefaultModelId(
-            registry
-              .getAll()
-              .filter((candidate) => candidate.provider === IISHKO_PROVIDER_ID)
-              .map((candidate) => candidate.id),
-          );
-          model = fallbackId ? registry.find(IISHKO_PROVIDER_ID, fallbackId) : undefined;
-          if (!model) {
-            throw new Error(
-              `Модель ИИШКО «${requested.id}» недоступна. Подключите аккаунт ИИШКО или выберите другую модель.`,
-            );
-          }
-        }
         if (input.modelId && !model) {
+          // The user's selected model is never replaced silently: a missing
+          // catalog entry (e.g. a temporarily unavailable ИИШКО model) surfaces
+          // as a turn failure so the UI can offer «Сменить модель» instead.
           throw new Error(
-            `Pi model '${input.modelId}' is not available. Use a discovered model or a provider-qualified custom model slug like 'openai/gpt-5.5'.`,
+            requested?.provider === IISHKO_PROVIDER_ID
+              ? `Модель ИИШКО «${requested.id}» недоступна. Подключите аккаунт ИИШКО или выберите другую модель.`
+              : `Pi model '${input.modelId}' is not available. Use a discovered model or a provider-qualified custom model slug like 'openai/gpt-5.5'.`,
           );
         }
         const shellPath = services.settingsManager.getShellPath();
@@ -3553,6 +3572,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 ...(thinkingLevel ? { thinkingLevel } : {}),
                 processSupervisor,
                 ...(gatewayControlAvailable ? { gatewayTools } : {}),
+                ...(piOptions?.customProviders
+                  ? { customProviders: piOptions.customProviders }
+                  : {}),
               }),
             catch: (cause) =>
               new ProviderAdapterRequestError({
@@ -4093,6 +4115,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               input.environment,
               input.instanceId,
               { stateDir: serverConfig.stateDir, homeDir: serverConfig.homeDir },
+              input.customProviders,
             );
             const services = await piSdk.createAgentSessionServices({
               cwd,

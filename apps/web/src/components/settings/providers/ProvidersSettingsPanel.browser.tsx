@@ -36,6 +36,21 @@ vi.mock("~/hooks/useProviderStatusRefresh", () => ({
   useRefreshProviderStatusesNow: () => harness.refresh,
 }));
 
+const nativeHarness = vi.hoisted(() => ({
+  listEndpointModels: vi.fn(async () => ({ models: [] as Array<Record<string, unknown>> })),
+}));
+vi.mock("~/nativeApi", async (importOriginal) => {
+  const original = await importOriginal<typeof import("~/nativeApi")>();
+  return {
+    ...original,
+    ensureNativeApi: () =>
+      ({
+        provider: { listEndpointModels: nativeHarness.listEndpointModels },
+        server: { updateProvider: vi.fn(async () => {}) },
+      }) as unknown as ReturnType<typeof original.ensureNativeApi>,
+  };
+});
+
 import { AppSettingsSchema, type AppSettings } from "~/appSettings";
 import { ProvidersSettingsPanel } from "./ProvidersSettingsPanel";
 
@@ -53,6 +68,8 @@ const props = {
 beforeEach(() => {
   harness.reconciled = true;
   harness.refresh.mockReset();
+  nativeHarness.listEndpointModels.mockReset();
+  nativeHarness.listEndpointModels.mockResolvedValue({ models: [] });
   harness.statuses = PROVIDER_DESCRIPTORS.map(({ kind }) => ({
     provider: kind,
     instanceId: kind,
@@ -193,8 +210,11 @@ it("reports Claude as connected and visible when only a secondary account is rea
   await expect
     .element(page.getByRole("switch", { name: "Show Claude in the provider picker" }))
     .toBeChecked();
-  // Accounts are managed on the Accounts page; Providers links there.
-  expect(page.getByRole("switch", { name: "Enable Privat" }).elements()).toHaveLength(0);
+  // Provider instances are managed in the instances section below; the
+  // per-agent rows still link to the Accounts page for sign-in.
+  await expect
+    .element(page.getByRole("switch", { name: "Enable Privat", exact: true }))
+    .toBeVisible();
   await page.getByRole("button", { name: "Manage accounts" }).first().click();
   expect(props.onManageAccounts).toHaveBeenCalledWith("claudeAgent");
 });
@@ -425,4 +445,124 @@ it("offers no agents reset for account-only changes", async () => {
   expect(
     page.getByRole("button", { name: "Reset agents to default", exact: true }).elements(),
   ).toHaveLength(0);
+});
+
+it("adds a CLI provider instance through the provider dialog", async () => {
+  const updateSettingsAndWait = vi.fn(async (_patch: Partial<AppSettings>) => {});
+  await render(<ProvidersSettingsPanel {...props} updateSettingsAndWait={updateSettingsAndWait} />);
+  await page.getByRole("button", { name: "Add provider", exact: true }).click();
+  await page.getByRole("textbox", { name: "Label", exact: true }).fill("Team agent");
+  await page.getByRole("textbox", { name: /Account ID/u }).fill("pi_team");
+  await page.getByRole("textbox", { name: "Binary path", exact: true }).fill("/opt/team-agent");
+  await page.getByRole("button", { name: "Add provider", exact: true }).last().click();
+
+  await expect.poll(() => updateSettingsAndWait).toHaveBeenCalled();
+  const patch = updateSettingsAndWait.mock.calls.at(-1)?.[0] as unknown as {
+    providerInstances?: Record<string, Record<string, unknown>>;
+  };
+  expect(patch.providerInstances?.pi_team).toMatchObject({
+    driver: "pi",
+    displayName: "Team agent",
+    enabled: true,
+  });
+  expect(patch.providerInstances?.pi_team?.config).toMatchObject({
+    binaryPath: "/opt/team-agent",
+  });
+});
+
+it("adds an OpenAI-compatible endpoint, loads models once, and stores the key as a secret env var", async () => {
+  nativeHarness.listEndpointModels.mockResolvedValue({
+    models: [{ id: "model-a", name: "Model A", contextWindow: 64000 }, { id: "model-b" }],
+  });
+  const updateSettingsAndWait = vi.fn(async (_patch: Partial<AppSettings>) => {});
+  await render(<ProvidersSettingsPanel {...props} updateSettingsAndWait={updateSettingsAndWait} />);
+  await page.getByRole("button", { name: "Add provider", exact: true }).click();
+  await page.getByRole("button", { name: "OpenAI-compatible API", exact: true }).click();
+  await page.getByRole("textbox", { name: "Label", exact: true }).fill("Local API");
+  await page.getByRole("textbox", { name: /Account ID/u }).fill("pi_localapi");
+  await page
+    .getByRole("textbox", { name: "Base URL", exact: true })
+    .fill("https://api.example.com/v1");
+  await page.getByRole("textbox", { name: /API key Stored/u }).fill("sk-test-key");
+  await page.getByRole("button", { name: "Load models", exact: true }).click();
+
+  await expect
+    .poll(() => nativeHarness.listEndpointModels)
+    .toHaveBeenCalledWith({ baseUrl: "https://api.example.com/v1", apiKey: "sk-test-key" });
+  await expect.element(page.getByPlaceholder("Model ID").first()).toHaveValue("model-a");
+
+  await page.getByRole("button", { name: "Add provider", exact: true }).last().click();
+  await expect.poll(() => updateSettingsAndWait).toHaveBeenCalled();
+  const patch = updateSettingsAndWait.mock.calls.at(-1)?.[0] as unknown as {
+    providerInstances?: Record<string, Record<string, unknown>>;
+  };
+  expect(patch.providerInstances?.pi_localapi).toMatchObject({
+    driver: "pi",
+    displayName: "Local API",
+    enabled: true,
+    config: {
+      kind: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+      apiKeyEnv: "IISHKO_CUSTOM_API_KEY",
+      models: [{ id: "model-a", name: "Model A", contextWindow: 64000 }, { id: "model-b" }],
+    },
+    environment: [{ name: "IISHKO_CUSTOM_API_KEY", value: "sk-test-key", sensitive: true }],
+  });
+});
+
+it("edits, toggles, and deletes a custom provider instance but never the built-in", async () => {
+  const updateSettings = vi.fn();
+  const updateSettingsAndWait = vi.fn(async (_patch: Partial<AppSettings>) => {});
+  const settings: AppSettings = {
+    ...props.settings,
+    providerInstances: {
+      pi_team: {
+        driver: "pi",
+        displayName: "Team",
+        enabled: true,
+        config: { binaryPath: "/old/pi" },
+      },
+    },
+  };
+  await render(
+    <ProvidersSettingsPanel
+      {...props}
+      settings={settings}
+      updateSettings={updateSettings}
+      updateSettingsAndWait={updateSettingsAndWait}
+    />,
+  );
+
+  // Built-in instances get no delete button; the custom one does.
+  expect(page.getByRole("button", { name: "Remove Pi", exact: true }).elements()).toHaveLength(0);
+
+  await page.getByRole("switch", { name: "Enable Team", exact: true }).click();
+  const togglePatch = updateSettings.mock.calls.at(-1)?.[0] as unknown as {
+    providerInstances?: Record<string, { enabled?: boolean }>;
+  };
+  expect(togglePatch.providerInstances?.pi_team?.enabled).toBe(false);
+
+  await page.getByRole("button", { name: "Edit Team", exact: true }).click();
+  await expect
+    .element(page.getByRole("textbox", { name: "Label", exact: true }))
+    .toHaveValue("Team");
+  await page.getByRole("textbox", { name: "Label", exact: true }).fill("Team Two");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => updateSettingsAndWait).toHaveBeenCalled();
+  const editPatch = updateSettingsAndWait.mock.calls.at(-1)?.[0] as unknown as {
+    providerInstances?: Record<string, Record<string, unknown>>;
+  };
+  expect(editPatch.providerInstances?.pi_team).toMatchObject({
+    displayName: "Team Two",
+    config: { binaryPath: "/old/pi" },
+  });
+
+  updateSettingsAndWait.mockClear();
+  await page.getByRole("button", { name: "Remove Team", exact: true }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect.poll(() => updateSettingsAndWait).toHaveBeenCalled();
+  const deletePatch = updateSettingsAndWait.mock.calls.at(-1)?.[0] as unknown as {
+    providerInstances?: Record<string, unknown>;
+  };
+  expect(deletePatch.providerInstances?.pi_team).toBeUndefined();
 });

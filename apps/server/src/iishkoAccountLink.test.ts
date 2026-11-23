@@ -361,7 +361,7 @@ it("maps the full profile fixture to camelCase and drops junk values", async () 
   ]);
 });
 
-it("loads models through the IDE proxy for a device session and the public API for a manual key", async () => {
+it("loads models through the IDE proxy for device sessions and manual keys", async () => {
   const { account, request } = harness(pairingRoute("dev-base-1", () => approved("dev-base-1")));
   const started = await startPairing(account);
   await account.pollTelegramPairing({ pairingId: started.pairingId });
@@ -369,11 +369,32 @@ it("loads models through the IDE proxy for a device session and the public API f
   expect(urls).toContain("https://api.reformboss.com/webapp/api/ide/v1/models");
   expect(urls).not.toContain("https://api.reformboss.com/v1/models");
 
-  const manual = harness(() => undefined);
+  // A pasted key now goes through key-login and gets a device session too, so
+  // its models are validated through the same IDE proxy — never the public API.
+  const manual = harness((input) => {
+    const url = String(input.url);
+    if (url === `${BASE}/key-login`) {
+      return json(200, {
+        status: "approved",
+        device_token: "idd_manual_test",
+        account: { username: "manual-user" },
+      });
+    }
+    if (url === `${BASE}/token`) {
+      return new Headers(input.headers).get("authorization") === "Bearer idd_manual_test"
+        ? json(200, {
+            token: "ids_manual_test",
+            expires_at: Math.floor(Date.now() / 1000) + 3600,
+            refresh_in: 600,
+          })
+        : json(401, {});
+    }
+    return undefined;
+  });
   await manual.account.connectApiKey({ apiKey: "sk-manual-1234" });
-  expect(manual.request.mock.calls.map(([input]) => String(input.url))).toContain(
-    "https://api.reformboss.com/v1/models",
-  );
+  const manualUrls = manual.request.mock.calls.map(([input]) => String(input.url));
+  expect(manualUrls).toContain("https://api.reformboss.com/webapp/api/ide/v1/models");
+  expect(manualUrls).not.toContain("https://api.reformboss.com/v1/models");
 });
 
 it("prefers the https base_url returned by /token over the proxy default", async () => {

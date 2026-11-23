@@ -116,12 +116,12 @@ describe("resolveCanonicalWorkspaceRoots", () => {
     // chatWorkspaceRoot/studioWorkspaceRoot don't exist yet under the resolved
     // home, so they must be re-derived from the canonicalized (symlink-free)
     // home rather than the raw, symlinked input.
-    expect(result.chatWorkspaceRoot).toBe(path.join(expectedHomeDir, "Documents", "Iishko"));
+    expect(result.chatWorkspaceRoot).toBe(path.join(expectedHomeDir, "Documents", "IISHKO"));
     expect(result.studioWorkspaceRoot).toBe(
-      path.join(expectedHomeDir, "Documents", "Iishko", "Studio"),
+      path.join(expectedHomeDir, "Documents", "IISHKO", "Studio"),
     );
     expect(result.groupsWorkspaceRoot).toBe(
-      path.join(expectedHomeDir, "Documents", "Iishko", "Groups"),
+      path.join(expectedHomeDir, "Documents", "IISHKO", "Groups"),
     );
   });
 
@@ -133,7 +133,7 @@ describe("resolveCanonicalWorkspaceRoots", () => {
     fs.mkdirSync(homeDir, { recursive: true });
     // Symlink ~/Documents to a real directory elsewhere, matching the bug
     // report scenario (e.g. iCloud-managed Documents on macOS). Neither
-    // Iishko/ nor Iishko/Studio exist yet underneath it.
+    // IISHKO/ nor IISHKO/Studio exist yet underneath it.
     const symlinkedDocuments = path.join(homeDir, "Documents");
     fs.symlinkSync(realDocuments, symlinkedDocuments, "dir");
 
@@ -144,9 +144,9 @@ describe("resolveCanonicalWorkspaceRoots", () => {
 
     const expectedDocuments = fs.realpathSync(realDocuments);
     expect(result.homeDir).toBe(fs.realpathSync(homeDir));
-    expect(result.chatWorkspaceRoot).toBe(path.join(expectedDocuments, "Iishko"));
-    expect(result.studioWorkspaceRoot).toBe(path.join(expectedDocuments, "Iishko", "Studio"));
-    expect(result.groupsWorkspaceRoot).toBe(path.join(expectedDocuments, "Iishko", "Groups"));
+    expect(result.chatWorkspaceRoot).toBe(path.join(expectedDocuments, "IISHKO"));
+    expect(result.studioWorkspaceRoot).toBe(path.join(expectedDocuments, "IISHKO", "Studio"));
+    expect(result.groupsWorkspaceRoot).toBe(path.join(expectedDocuments, "IISHKO", "Groups"));
     expect(fs.existsSync(result.chatWorkspaceRoot)).toBe(false);
     expect(fs.existsSync(result.studioWorkspaceRoot)).toBe(false);
     expect(fs.existsSync(result.groupsWorkspaceRoot)).toBe(false);
