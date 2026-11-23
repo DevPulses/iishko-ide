@@ -335,7 +335,11 @@ it("maps the full profile fixture to camelCase and drops junk values", async () 
     checkedAt: 1_700_000_100,
   });
   expect(profile.models.available[0]?.reason).toBeUndefined();
-  expect(profile.models.available[1]).toMatchObject({ id: "glm-5.3", status: "busy", unstable: true });
+  expect(profile.models.available[1]).toMatchObject({
+    id: "glm-5.3",
+    status: "busy",
+    unstable: true,
+  });
   expect(profile.models.available[1]?.latencyMs).toBeUndefined();
   expect(profile.models.available[1]?.checkedAt).toBeUndefined();
   expect(profile.models.locked[0]).toMatchObject({

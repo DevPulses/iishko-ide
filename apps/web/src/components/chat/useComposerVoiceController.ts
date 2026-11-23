@@ -240,9 +240,7 @@ export function useComposerVoiceController(
           voiceKind === "pi"
             ? "Голосовой ввод недоступен для ИИШКО."
             : "Voice notes require a ChatGPT-authenticated Codex session.",
-        ...(activeProviderStatus?.message
-          ? { description: activeProviderStatus.message }
-          : {}),
+        ...(activeProviderStatus?.message ? { description: activeProviderStatus.message } : {}),
       });
       return;
     }
