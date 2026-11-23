@@ -1339,7 +1339,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ),
   );
 
-  if (options.platform === "mac" || (options.platform === "linux" && process.env.IISHKO_BUILD_CUA_DRIVER !== "0")) {
+  if (
+    options.platform === "mac" ||
+    (options.platform === "linux" && process.env.IISHKO_BUILD_CUA_DRIVER !== "0")
+  ) {
     const provisionCua = path.join(repoRoot, "apps/desktop/scripts/provision-cua-driver.mjs");
     const cuaDestination = path.join(stageResourcesDir, "cua-driver");
     const cuaPlatform = options.platform === "mac" ? "darwin" : "linux";
