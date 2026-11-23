@@ -52,7 +52,7 @@ jobs:
         with:
           name: iishko-ide-linux-appimage
           path: |
-            apps/desktop/dist-electron/*.AppImage
-            apps/desktop/dist-electron/*.tar.gz
-            apps/desktop/dist-electron/*.zip
+            release/*.AppImage
+            release/*.tar.gz
+            release/*.zip
           if-no-files-found: warn
