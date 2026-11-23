@@ -1328,7 +1328,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ),
   );
 
-  if (options.platform === "mac" || options.platform === "linux") {
+  if (options.platform === "mac" || (options.platform === "linux" && process.env.IISHKO_BUILD_CUA_DRIVER !== "0")) {
     const provisionCua = path.join(repoRoot, "apps/desktop/scripts/provision-cua-driver.mjs");
     const cuaDestination = path.join(stageResourcesDir, "cua-driver");
     const cuaPlatform = options.platform === "mac" ? "darwin" : "linux";
@@ -1342,6 +1342,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         })`node ${provisionCua} --destination ${cuaDestination} --platform ${cuaPlatform} --arch ${options.arch}`,
       ),
     );
+  } else if (options.platform === "linux") {
+    const cuaDestination = path.join(stageResourcesDir, "cua-driver");
+    yield* fs.makeDirectory(cuaDestination, { recursive: true });
   }
   if (options.platform === "mac") {
     yield* timedBuildStage(

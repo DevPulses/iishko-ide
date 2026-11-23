@@ -43,6 +43,8 @@ jobs:
         run: bun run build:desktop
 
       - name: Package Linux Desktop (AppImage)
+        env:
+          IISHKO_BUILD_CUA_DRIVER: "0"
         run: bun run dist:desktop:linux
 
       - name: Upload Linux Build Artifact
