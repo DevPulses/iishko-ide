@@ -6,13 +6,17 @@
 // what the gateway reported.
 
 import type { IishkoProfile } from "@iishko/contracts";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 import { useTranslation } from "~/i18n";
 import { InfoIcon } from "~/lib/icons";
+import { iishkoAccountQueryKeys } from "~/lib/iishkoAccountReactQuery";
 import { iishkoModelDisplayName } from "~/lib/iishkoModelNames";
+import { iishkoModelStatusKind, iishkoStatusDotClass } from "~/lib/iishkoModelStatus";
 import { cn } from "~/lib/utils";
+import { IishkoModelStatusDialog } from "./IishkoModelStatusDialog";
 
 const MODELS_COLLAPSED_COUNT = 12;
 
@@ -98,8 +102,34 @@ function StatTile(props: { readonly label: string; readonly value: string }) {
   );
 }
 
+function SpendTile(props: {
+  readonly label: string;
+  readonly usd: number | undefined;
+  readonly requests: number | undefined;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+      <p className="text-ui-sm text-muted-foreground">{props.label}</p>
+      <p className="text-ui-lg font-medium tabular-nums">
+        {props.usd !== undefined ? formatUsd(props.usd) : "—"}
+      </p>
+      {props.requests !== undefined ? (
+        <p className="text-ui-sm text-muted-foreground">
+          {t("settings:iishkoProfile_spendRequests", { count: props.requests })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ModelChips(props: {
-  readonly models: ReadonlyArray<{ readonly id: string; readonly title?: string | undefined }>;
+  readonly models: ReadonlyArray<{
+    readonly id: string;
+    readonly title?: string | undefined;
+    readonly status?: string | undefined;
+    readonly unstable?: boolean | undefined;
+  }>;
   readonly locked?: boolean;
   readonly testId: string;
 }) {
@@ -110,21 +140,34 @@ function ModelChips(props: {
   return (
     <div className="space-y-2">
       <ul className="flex flex-wrap gap-1.5" data-testid={props.testId}>
-        {shown.map((model) => (
-          <li
-            key={model.id}
-            title={model.id}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-ui-sm",
-              props.locked
-                ? "border-border text-muted-foreground opacity-60"
-                : "border-[var(--iishko-accent)] text-foreground",
-            )}
-          >
-            {props.locked ? <LockGlyph /> : null}
-            {iishkoModelDisplayName(model.id, model.title)}
-          </li>
-        ))}
+        {shown.map((model) => {
+          const kind =
+            !props.locked && model.status !== undefined
+              ? iishkoModelStatusKind(model.status, model.unstable)
+              : null;
+          return (
+            <li
+              key={model.id}
+              title={model.id}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-ui-sm",
+                props.locked
+                  ? "border-border text-muted-foreground opacity-60"
+                  : "border-[var(--iishko-accent)] text-foreground",
+              )}
+            >
+              {props.locked ? (
+                <LockGlyph />
+              ) : kind ? (
+                <span
+                  aria-hidden
+                  className={cn("size-1.5 rounded-full", iishkoStatusDotClass(kind))}
+                />
+              ) : null}
+              {iishkoModelDisplayName(model.id, model.title)}
+            </li>
+          );
+        })}
       </ul>
       {hidden > 0 ? (
         <Button size="xs" variant="ghost" onClick={() => setExpanded(true)}>
@@ -177,9 +220,11 @@ export function IishkoProfileCard(props: {
 }) {
   const { t, formatLocale } = useTranslation();
   const tierTitle = useTierTitle();
+  const queryClient = useQueryClient();
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const { profile } = props;
   const name = profile.user.firstName ?? profile.user.username ?? "";
-  const { limits, balance } = profile;
+  const { limits, balance, spend } = profile;
   const hasLimits =
     limits !== undefined &&
     (limits.requestsLimit !== undefined ||
@@ -229,6 +274,11 @@ export function IishkoProfileCard(props: {
               </span>
             ) : null}
           </p>
+          {profile.user.daysInProject !== undefined ? (
+            <p className="text-ui-sm text-muted-foreground">
+              {t("settings:iishkoProfile_daysInProject", { count: profile.user.daysInProject })}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -303,7 +353,58 @@ export function IishkoProfileCard(props: {
         </Section>
       ) : null}
 
+      {spend ? (
+        <Section title={t("settings:iishkoProfile_spend")}>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <SpendTile
+              label={t("settings:iishkoProfile_spendToday")}
+              usd={spend.todayUsd ?? limits?.dailyUsdUsed}
+              requests={spend.todayRequests}
+            />
+            <SpendTile
+              label={t("settings:iishkoProfile_spendWeek")}
+              usd={spend.weekUsd}
+              requests={spend.weekRequests}
+            />
+            <SpendTile
+              label={t("settings:iishkoProfile_spendMonth")}
+              usd={spend.monthUsd}
+              requests={spend.monthRequests}
+            />
+            <SpendTile
+              label={t("settings:iishkoProfile_spendTotal")}
+              usd={spend.totalUsd}
+              requests={undefined}
+            />
+          </div>
+          {(spend.topModels ?? []).length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-ui-sm text-muted-foreground">
+                {t("settings:iishkoProfile_topModels")}
+              </p>
+              <ul className="flex flex-wrap gap-1.5">
+                {(spend.topModels ?? []).map((model) => (
+                  <li
+                    key={model.id}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-ui-sm text-foreground"
+                  >
+                    {model.title ?? model.id}
+                    {model.usd !== undefined ? ` · ${formatUsd(model.usd)}` : ""}
+                    {` · ${model.requests}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Section>
+      ) : null}
+
       <Section title={t("settings:iishkoProfile_models")}>
+        <div className="flex justify-end">
+          <Button size="xs" variant="outline" onClick={() => setStatusDialogOpen(true)}>
+            {t("settings:iishkoModelStatus_open")}
+          </Button>
+        </div>
         {profile.models.available.length > 0 ? (
           <ModelChips models={profile.models.available} testId="iishko-available-models" />
         ) : (
@@ -331,6 +432,16 @@ export function IishkoProfileCard(props: {
           {t("settings:iishkoProfile_signOut")}
         </Button>
       </div>
+
+      <IishkoModelStatusDialog
+        open={statusDialogOpen}
+        onOpenChange={setStatusDialogOpen}
+        profile={profile}
+        refreshing={false}
+        onRefresh={() =>
+          void queryClient.invalidateQueries({ queryKey: iishkoAccountQueryKeys.profile() })
+        }
+      />
     </div>
   );
 }

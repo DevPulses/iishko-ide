@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -185,7 +186,11 @@ describe("cached macOS icon catalog verification", () => {
   });
 });
 
-describe("macOS icon catalog workflows", () => {
+// These checks pin the GitHub release workflows; the IISHKO fork publishes via
+// Gitea Actions (.gitea/workflows), so skip them when .github/workflows is absent.
+const hasGithubWorkflows = existsSync(join(repoRoot, ".github/workflows"));
+
+describe.skipIf(!hasGithubWorkflows)("macOS icon catalog workflows", () => {
   const workflow = (name: string) =>
     parse(readFileSync(join(repoRoot, ".github/workflows", name), "utf8")) as {
       jobs: Record<

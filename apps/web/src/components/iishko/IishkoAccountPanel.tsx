@@ -25,6 +25,7 @@ import {
   useIishkoProfile,
 } from "~/lib/iishkoAccountReactQuery";
 import { IishkoProfileCard } from "./IishkoProfileCard";
+import { IishkoSubagentsSection } from "./IishkoSubagentsSection";
 import { useIishkoLoginRequestStore } from "~/lib/iishkoLoginRequest";
 import { openExternalLink } from "~/lib/linkChips";
 import { cn } from "~/lib/utils";
@@ -34,6 +35,7 @@ type StartedPairing = Extract<IishkoTelegramPairingStart, { state: "started" }> 
   readonly startedAt: number;
 };
 type Notice = "expired" | "denied" | "unavailable" | "invalidKey" | "network" | "revoked";
+type NoticeState = { readonly kind: Notice; readonly detail?: string | undefined };
 type View = { kind: "idle" } | { kind: "pairing"; pairing: StartedPairing } | { kind: "manual" };
 
 const NOTICE_KEYS: Record<Notice, string> = {
@@ -54,6 +56,15 @@ function noticeFromError(error: unknown): Notice {
   return code === IISHKO_ACCOUNT_ERROR_CODES.invalidKey ? "invalidKey" : "network";
 }
 
+/** Server-provided Russian text for the API-key flow; other paths keep the localized notice. */
+function noticeDetailFromError(error: unknown): string | undefined {
+  const message =
+    typeof error === "object" && error !== null && "message" in error
+      ? (error as { message: unknown }).message
+      : undefined;
+  return typeof message === "string" && message.trim() ? message.trim().slice(0, 300) : undefined;
+}
+
 function formatRemaining(ms: number): string {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -62,7 +73,7 @@ function formatRemaining(ms: number): string {
 /** Polls a started pairing until it settles; stops when the view unmounts or changes. */
 function usePairingPoll(
   pairing: StartedPairing | null,
-  onSettled: (result: { connected: IishkoAccountStatus } | { notice: Notice }) => void,
+  onSettled: (result: { connected: IishkoAccountStatus } | { notice: NoticeState }) => void,
 ) {
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
@@ -83,10 +94,10 @@ function usePairingPoll(
         settledRef.current(
           result.state === "connected"
             ? { connected: result.status }
-            : { notice: result.state === "denied" ? "denied" : "expired" },
+            : { notice: { kind: result.state === "denied" ? "denied" : "expired" } },
         );
       } catch (error) {
-        if (active) settledRef.current({ notice: noticeFromError(error) });
+        if (active) settledRef.current({ notice: { kind: noticeFromError(error) } });
       }
     };
     timer = setTimeout(() => void poll(), pairing.pollIntervalMs);
@@ -115,7 +126,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
   const telegramConnected = status?.state === "connected" && status.source === "telegram";
   const profileQuery = useIishkoProfile(telegramConnected);
   const [view, setView] = useState<View>({ kind: "idle" });
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [copied, setCopied] = useState(false);
@@ -135,7 +146,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
   useEffect(() => {
     if (pairing && Date.parse(pairing.expiresAt) <= now) {
       setView({ kind: "idle" });
-      setNotice("expired");
+      setNotice({ kind: "expired" });
     }
   }, [now, pairing]);
 
@@ -144,7 +155,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
     try {
       await task();
     } catch (error) {
-      setNotice(noticeFromError(error));
+      setNotice({ kind: noticeFromError(error) });
     } finally {
       setBusy(false);
     }
@@ -155,7 +166,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
       setNotice(null);
       const result = await ensureNativeApi().iishko.beginTelegramPairing();
       if (result.state === "unavailable") {
-        setNotice("unavailable");
+        setNotice({ kind: "unavailable" });
         setView({ kind: "manual" });
         return;
       }
@@ -180,15 +191,21 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
     setView({ kind: "idle" });
   };
 
-  const connectKey = () =>
-    run(async () => {
-      setNotice(null);
+  const connectKey = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
       const next = await ensureNativeApi().iishko.connectApiKey({ apiKey: apiKey.trim() });
       void queryClient.removeQueries({ queryKey: iishkoAccountQueryKeys.profile() });
       setApiKey("");
       setView({ kind: "idle" });
       applyIishkoAccountStatus(queryClient, next);
-    });
+    } catch (error) {
+      setNotice({ kind: noticeFromError(error), detail: noticeDetailFromError(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const signOut = () =>
     run(async () => {
@@ -206,14 +223,14 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
       role="status"
       className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-ui-sm text-foreground"
     >
-      <span className="min-w-0 flex-1">{t(NOTICE_KEYS[notice])}</span>
-      {notice === "expired" || notice === "denied" || notice === "revoked" ? (
+      <span className="min-w-0 flex-1">{notice.detail ?? t(NOTICE_KEYS[notice.kind])}</span>
+      {notice.kind === "expired" || notice.kind === "denied" || notice.kind === "revoked" ? (
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void startTelegram()}>
-          {notice === "revoked"
+          {notice.kind === "revoked"
             ? t("settings:iishkoAccount_signInWithTelegram")
             : t("settings:iishkoAccount_getNewCode")}
         </Button>
-      ) : notice === "network" ? (
+      ) : notice.kind === "network" ? (
         <Button size="xs" variant="outline" onClick={() => void statusQuery.refetch()}>
           {t("settings:iishkoAccount_retry")}
         </Button>
@@ -227,7 +244,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
     }
   }, [profileQuery.error, statusQuery]);
   useEffect(() => {
-    if (status?.state === "revoked") setNotice("revoked");
+    if (status?.state === "revoked") setNotice({ kind: "revoked" });
   }, [status?.state]);
 
   const card = cn(
@@ -243,6 +260,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
           busy={busy}
           onSignOut={() => void signOut()}
         />
+        <IishkoSubagentsSection className="mt-3" />
         {notice ? <div className="mt-3">{noticeRow}</div> : null}
       </div>
     );
@@ -276,6 +294,7 @@ export function IishkoAccountPanel({ className }: { className?: string }) {
             {t("settings:iishkoAccount_disconnect")}
           </Button>
         </div>
+        <IishkoSubagentsSection className="mt-4 border-0 bg-transparent p-0" />
         {noticeRow}
       </div>
     );

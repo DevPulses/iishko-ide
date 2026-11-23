@@ -22,7 +22,9 @@ export function iishkoProfileQueryOptions(enabled: boolean) {
     queryFn: (): Promise<IishkoProfile> => ensureNativeApi().iishko.profile(),
     enabled,
     staleTime: 60_000,
+    refetchInterval: enabled ? 120_000 : false,
     refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     retry: 1,
   });
 }

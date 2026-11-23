@@ -45,7 +45,7 @@ describe("storageOriginMigration", () => {
     expect(globalThis.localStorage.getItem("iishko:composer-drafts:v1")).toBe("draft");
   });
 
-  it("normalizes an imported theme so a mode that was never chosen stays light", async () => {
+  it("normalizes an imported theme so a mode that was never chosen stays dark", async () => {
     const { importIishkoStorageSnapshot } = await import("./storageOriginMigration");
     const { parseStoredThemeState } = await import("./theme/theme.logic");
 
@@ -53,12 +53,12 @@ describe("storageOriginMigration", () => {
       importIishkoStorageSnapshot({
         version: 1,
         exportedAt: "2026-07-09T00:00:00.000Z",
-        entries: { "iishko:theme": "dark" },
+        entries: { "iishko:theme": "light" },
       }),
     ).toBe(true);
     const stored = parseStoredThemeState(globalThis.localStorage.getItem("iishko:theme"));
-    expect(stored.mode).toBe("light");
-    expect(JSON.parse(globalThis.localStorage.getItem("iishko:theme") ?? "{}").mode).toBe("light");
+    expect(stored.mode).toBe("dark");
+    expect(JSON.parse(globalThis.localStorage.getItem("iishko:theme") ?? "{}").mode).toBe("dark");
   });
 
   it("rejects an invalid snapshot before writing any entry", async () => {
@@ -129,7 +129,7 @@ describe("storageOriginMigration", () => {
 
     await import("./storageOriginMigration");
     await vi.waitFor(() => expect(acknowledgeSnapshot).toHaveBeenCalledOnce());
-    expect(JSON.parse(globalThis.localStorage.getItem("iishko:theme") ?? "{}").mode).toBe("light");
+    expect(JSON.parse(globalThis.localStorage.getItem("iishko:theme") ?? "{}").mode).toBe("dark");
   });
 
   it("does not acknowledge when renderer storage rejects a write", async () => {

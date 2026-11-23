@@ -4,6 +4,8 @@
 // Layer: Web IISHKO account feature (sidebar footer).
 
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { appRailButtonClassName } from "~/components/AppRail";
 import { ComposerPickerMenuPopup } from "~/components/chat/ComposerPickerMenuPopup";
@@ -25,21 +27,57 @@ import { ExternalLinkIcon, SettingsIcon, UserIcon } from "~/lib/icons";
 import {
   IISHKO_BOT_URL,
   iishkoAccountLabel,
+  iishkoAccountQueryKeys,
   useIishkoAccountStatus,
   useIishkoProfile,
 } from "~/lib/iishkoAccountReactQuery";
 import { openExternalLink } from "~/lib/linkChips";
 import { isMacPlatform } from "~/lib/utils";
+import { IishkoModelStatusDialog } from "./IishkoModelStatusDialog";
+
+function formatUsdCompact(value: number): string {
+  return `$${value.toFixed(value >= 100 ? 0 : 2)}`;
+}
 
 export function IishkoAccountFooterControl() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const status = useIishkoAccountStatus().data;
   const connected = status?.state === "connected";
   const profile = useIishkoProfile(connected && status.source === "telegram").data;
   const profileName = profile ? (profile.user.firstName ?? profile.user.username ?? null) : null;
   const label = profileName ?? iishkoAccountLabel(status);
   const rankEmoji = profile?.rank.emoji ?? null;
+  const balanceUsd = profile?.balance?.usd;
+  const limits = profile?.limits;
+  const todayUsd = profile?.spend?.todayUsd ?? limits?.dailyUsdUsed;
+  const requestsUsed = limits?.requestsToday;
+  const requestsLimit = limits?.requestsLimit;
+  const usdCap = limits?.dailyUsdCap;
+  const limitRatio =
+    requestsLimit !== undefined && requestsLimit > 0 && requestsUsed !== undefined
+      ? Math.min(1, Math.max(0, requestsUsed / requestsLimit))
+      : usdCap !== undefined && usdCap > 0 && todayUsd !== undefined
+        ? Math.min(1, Math.max(0, todayUsd / usdCap))
+        : null;
+  const limitText =
+    requestsLimit !== undefined && requestsUsed !== undefined
+      ? `${requestsUsed} / ${requestsLimit}`
+      : usdCap !== undefined && todayUsd !== undefined
+        ? `${formatUsdCompact(todayUsd)} / ${formatUsdCompact(usdCap)}`
+        : null;
+  const tooltipExtra = [
+    profile?.user.daysInProject !== undefined
+      ? t("settings:iishkoProfile_daysInProject", { count: profile.user.daysInProject })
+      : null,
+    todayUsd !== undefined
+      ? t("settings:iishkoFooter_spentToday", { value: formatUsdCompact(todayUsd) })
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const title = connected
     ? profile && label
       ? `${label} · ${profile.rank.title}`
@@ -50,6 +88,7 @@ export function IishkoAccountFooterControl() {
         : t("settings:iishkoAccount_connectedManual")
     : t("settings:iishkoAccount_notConnected");
   const openAccount = () => void navigate({ to: "/settings", search: { section: "profile" } });
+  const buttonTitle = tooltipExtra ? `${title} — ${tooltipExtra}` : title;
 
   return (
     <Menu>
@@ -57,7 +96,7 @@ export function IishkoAccountFooterControl() {
         render={<MenuTrigger />}
         icon={UserIcon}
         iconClassName="size-5"
-        label={title}
+        label={buttonTitle}
         className={appRailButtonClassName(false)}
       >
         {connected ? (
@@ -87,6 +126,28 @@ export function IishkoAccountFooterControl() {
                 {t("settings:iishkoAccount_disconnectedBody")}
               </span>
             )}
+            {connected && (balanceUsd !== undefined || limitText !== null) ? (
+              <span className="flex flex-col gap-1 pt-0.5">
+                {balanceUsd !== undefined ? (
+                  <span className="text-ui-sm font-medium tabular-nums text-foreground">
+                    {formatUsdCompact(balanceUsd)}
+                  </span>
+                ) : null}
+                {limitRatio !== null && limitText !== null ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                      <span
+                        className="block h-full rounded-full bg-[var(--iishko-accent)]"
+                        style={{ width: `${Math.round(limitRatio * 100)}%` }}
+                      />
+                    </span>
+                    <span className="text-ui-sm tabular-nums text-muted-foreground">
+                      {limitText}
+                    </span>
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
           </div>
           {connected ? null : (
             <div className="px-2 pt-1 pb-1.5">
@@ -102,10 +163,19 @@ export function IishkoAccountFooterControl() {
         <MenuSeparator />
         <MenuGroup>
           {connected ? (
-            <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={openAccount}>
-              <SidebarContextMenuIcon icon={UserIcon} />
-              <span>{t("settings:nav_iishkoAccount")}</span>
-            </MenuItem>
+            <>
+              <MenuItem
+                className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
+                onClick={() => setStatusDialogOpen(true)}
+              >
+                <SidebarContextMenuIcon icon={SettingsIcon} />
+                <span>{t("settings:iishkoModelStatus_open")}</span>
+              </MenuItem>
+              <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={openAccount}>
+                <SidebarContextMenuIcon icon={UserIcon} />
+                <span>{t("settings:nav_iishkoAccount")}</span>
+              </MenuItem>
+            </>
           ) : null}
           <MenuItem
             className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
@@ -124,6 +194,15 @@ export function IishkoAccountFooterControl() {
           </MenuItem>
         </MenuGroup>
       </ComposerPickerMenuPopup>
+      <IishkoModelStatusDialog
+        open={statusDialogOpen}
+        onOpenChange={setStatusDialogOpen}
+        profile={profile}
+        refreshing={false}
+        onRefresh={() =>
+          void queryClient.invalidateQueries({ queryKey: iishkoAccountQueryKeys.profile() })
+        }
+      />
     </Menu>
   );
 }

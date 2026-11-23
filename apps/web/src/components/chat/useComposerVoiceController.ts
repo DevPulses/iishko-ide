@@ -47,6 +47,7 @@ export interface UseComposerVoiceControllerOptions {
   selectedProvider: ProviderKind;
   selectedProviderInstanceId: ProviderInstanceId;
   voiceProviderInstanceId: ProviderInstanceId;
+  voiceProviderKind?: ProviderKind;
   activeProviderStatus: ServerProviderStatus | null;
   pendingUserInputCount: number;
   onTranscriptReady: (transcript: string) => void;
@@ -92,6 +93,7 @@ export function useComposerVoiceController(
     selectedProvider,
     selectedProviderInstanceId,
     voiceProviderInstanceId,
+    voiceProviderKind,
     activeProviderStatus,
     pendingUserInputCount,
     onTranscriptReady,
@@ -117,6 +119,7 @@ export function useComposerVoiceController(
   const voiceProviderRef = useRef<ProviderKind>(selectedProvider);
   const composerProviderInstanceRef = useRef<ProviderInstanceId>(selectedProviderInstanceId);
   const voiceProviderInstanceRef = useRef<ProviderInstanceId>(voiceProviderInstanceId);
+  const voiceProviderKindRef = useRef<ProviderKind>(voiceProviderKind ?? "codex");
   const voiceRecordingStartedAtRef = useRef<number | null>(null);
   const failureCopy = {
     ...DEFAULT_FAILURE_COPY,
@@ -129,7 +132,14 @@ export function useComposerVoiceController(
     voiceProviderRef.current = selectedProvider;
     composerProviderInstanceRef.current = selectedProviderInstanceId;
     voiceProviderInstanceRef.current = voiceProviderInstanceId;
-  }, [threadId, selectedProvider, selectedProviderInstanceId, voiceProviderInstanceId]);
+    voiceProviderKindRef.current = voiceProviderKind ?? "codex";
+  }, [
+    threadId,
+    selectedProvider,
+    selectedProviderInstanceId,
+    voiceProviderInstanceId,
+    voiceProviderKind,
+  ]);
 
   const voiceRecordingDurationLabel = formatVoiceRecordingDuration(voiceRecordingDurationMs);
   const { canStartVoiceNotes, showVoiceNotesControl } = deriveComposerVoiceState({
@@ -212,17 +222,27 @@ export function useComposerVoiceController(
     if (!activeProject) {
       return;
     }
+    const voiceKind = voiceProviderKindRef.current;
     if (activeProviderStatus?.authStatus === "unauthenticated") {
       toastManager.add({
         type: "error",
-        title: "Sign in to ChatGPT in Codex before using voice notes.",
+        title:
+          voiceKind === "pi"
+            ? "Подключите аккаунт ИИШКО перед использованием голосовых заметок."
+            : "Sign in to ChatGPT in Codex before using voice notes.",
       });
       return;
     }
     if (!canStartVoiceNotes) {
       toastManager.add({
         type: "error",
-        title: "Voice notes require a ChatGPT-authenticated Codex session.",
+        title:
+          voiceKind === "pi"
+            ? "Голосовой ввод недоступен для ИИШКО."
+            : "Voice notes require a ChatGPT-authenticated Codex session.",
+        ...(activeProviderStatus?.message
+          ? { description: activeProviderStatus.message }
+          : {}),
       });
       return;
     }
@@ -240,7 +260,7 @@ export function useComposerVoiceController(
       const api = readNativeApi();
       void api?.server
         .prewarmVoice?.({
-          provider: "codex",
+          provider: voiceProviderKindRef.current,
           providerInstanceId: voiceProviderInstanceId,
           cwd: activeProject.cwd,
           ...(activeThreadId ? { threadId: activeThreadId } : {}),
@@ -289,6 +309,7 @@ export function useComposerVoiceController(
     const requestProvider = selectedProvider;
     const requestProviderInstanceId = selectedProviderInstanceId;
     const requestVoiceProviderInstanceId = voiceProviderInstanceId;
+    const requestVoiceProviderKind = voiceProviderKindRef.current;
     const isCurrentVoiceRequest = () =>
       voiceTranscriptionRequestIdRef.current === requestId &&
       voiceThreadIdRef.current === requestThreadId &&
@@ -313,7 +334,7 @@ export function useComposerVoiceController(
         transcriptionStarted = true;
         return api.server
           .transcribeVoice({
-            provider: "codex",
+            provider: requestVoiceProviderKind,
             providerInstanceId: requestVoiceProviderInstanceId,
             cwd: activeProject.cwd,
             ...(activeThreadId ? { threadId: activeThreadId } : {}),

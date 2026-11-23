@@ -249,9 +249,73 @@ function readVoiceResponseErrorMessage(statusCode: number, body: string): string
 
 // --- IPC entrypoint --------------------------------------------------------
 
+export interface DesktopVoiceBackendRoute {
+  readonly getBackendHttpUrl: () => string;
+  readonly getAuthToken: () => string;
+}
+
+// Non-Codex providers (the built-in IISHKO Pi instance) transcribe through the
+// embedded server's voice-upload route, which reaches the provider adapter.
+async function transcribeVoiceViaBackendRoute(
+  input: ServerVoiceTranscriptionInput,
+  route: DesktopVoiceBackendRoute,
+): Promise<ServerVoiceTranscriptionResult> {
+  const baseUrl = route.getBackendHttpUrl();
+  if (!baseUrl) {
+    throw new Error("The desktop backend is unavailable. Reconnect and try again.");
+  }
+  const url = new URL("/api/voice/transcribe", baseUrl);
+  url.searchParams.set("provider", input.provider);
+  if (input.providerInstanceId) {
+    url.searchParams.set("providerInstanceId", input.providerInstanceId);
+  }
+  url.searchParams.set("cwd", input.cwd);
+  if (input.threadId) {
+    url.searchParams.set("threadId", input.threadId);
+  }
+  url.searchParams.set("mimeType", input.mimeType);
+  url.searchParams.set("sampleRateHz", String(input.sampleRateHz));
+  url.searchParams.set("durationMs", String(input.durationMs));
+  const token = route.getAuthToken();
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  const audioBuffer = decodeDesktopVoiceAudio(input);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": input.mimeType },
+    body: new Uint8Array(audioBuffer),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload !== null &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      typeof (payload as { error?: unknown }).error === "string"
+        ? ((payload as { error: string }).error ?? "")
+        : `Voice transcription failed with status ${response.status}.`;
+    throw new Error(message || `Voice transcription failed with status ${response.status}.`);
+  }
+  const text =
+    payload !== null &&
+    typeof payload === "object" &&
+    typeof (payload as { text?: unknown }).text === "string"
+      ? ((payload as { text: string }).text ?? "")
+      : "";
+  return { text };
+}
+
 async function transcribeVoiceViaDesktopBridge(
   input: ServerVoiceTranscriptionInput,
+  backendRoute?: DesktopVoiceBackendRoute,
 ): Promise<ServerVoiceTranscriptionResult> {
+  if (input.provider !== "codex") {
+    if (!backendRoute) {
+      throw new Error(`Voice transcription is unavailable for provider '${input.provider}'.`);
+    }
+    return transcribeVoiceViaBackendRoute(input, backendRoute);
+  }
   const audioBuffer = decodeDesktopVoiceAudio(input);
   const auth = await resolveDesktopVoiceAuth(input.cwd?.trim() || process.cwd());
   const response = await requestDesktopVoiceTranscription({
@@ -276,10 +340,13 @@ async function transcribeVoiceViaDesktopBridge(
   return { text };
 }
 
-export function registerDesktopVoiceTranscriptionHandler(): void {
+export function registerDesktopVoiceTranscriptionHandler(
+  backendRoute?: DesktopVoiceBackendRoute,
+): void {
   ipcMain.removeHandler(SERVER_TRANSCRIBE_VOICE_CHANNEL);
   ipcMain.handle(
     SERVER_TRANSCRIBE_VOICE_CHANNEL,
-    async (_event, input: ServerVoiceTranscriptionInput) => transcribeVoiceViaDesktopBridge(input),
+    async (_event, input: ServerVoiceTranscriptionInput) =>
+      transcribeVoiceViaDesktopBridge(input, backendRoute),
   );
 }

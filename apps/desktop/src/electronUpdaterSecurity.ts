@@ -303,6 +303,12 @@ export function hardenElectronUpdater(
         embeddedPublisherSubjects,
       );
       if (allowedPublisherNames.length === 0) {
+        if (publisherNames.length === 0) {
+          // Unsigned build with a publisher-less feed (the IISHKO generic
+          // update feed): there is no Authenticode identity to check. The
+          // feed's sha512 still authenticates the downloaded payload.
+          return Promise.resolve(null);
+        }
         return Promise.resolve(
           "Windows update signature verification blocked: no valid embedded publisher subject DN.",
         );

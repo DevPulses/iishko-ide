@@ -1,2 +1,4 @@
 bun.lock text eol=lf
 .githooks/* text eol=lf
+# Patch checksums are pinned (cuaDriverRelease.json): keep LF on every checkout.
+*.patch text eol=lf

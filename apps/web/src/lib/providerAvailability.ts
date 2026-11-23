@@ -261,13 +261,18 @@ export function resolveUnsentComposerProvider(input: {
 
 export interface VoiceTranscriptionTarget {
   readonly instanceId: ProviderInstanceId;
+  readonly provider: ProviderKind;
   readonly status: ServerProviderStatus;
 }
 
-// Voice always uses a Codex ChatGPT session. Prefer the actively selected Codex
-// account when it advertises voice, otherwise choose a usable configured account
-// by identity (default first, then stable instance id). Status-only identities are
-// deliberately ignored because they can outlive a removed or disabled account.
+// Voice-capable drivers: Codex ChatGPT sessions and the built-in IISHKO proxy.
+const VOICE_TRANSCRIPTION_DRIVERS: ReadonlySet<ProviderKind> = new Set(["codex", "pi"]);
+
+// Voice prefers the actively selected voice-capable provider, then Codex, then
+// IISHKO. Within a driver, prefer the selected account when it advertises voice,
+// otherwise choose a usable configured account by identity (default first, then
+// stable instance id). Status-only identities are deliberately ignored because
+// they can outlive a removed or disabled account.
 export function resolveVoiceTranscriptionTarget(input: {
   readonly statuses: readonly ServerProviderStatus[];
   readonly providerInstances: ReadonlyArray<{
@@ -281,45 +286,66 @@ export function resolveVoiceTranscriptionTarget(input: {
 }): VoiceTranscriptionTarget | null {
   const statusByInstanceId = new Map<ProviderInstanceId, ServerProviderStatus>();
   for (const status of input.statuses) {
-    if ((status.driver ?? status.provider) !== "codex") {
+    const driver = status.driver ?? status.provider;
+    if (driver !== "codex" && driver !== "pi") {
       continue;
     }
     statusByInstanceId.set(providerStatusInstanceKey(status), status);
   }
 
-  const orderedInstanceIds = input.providerInstances
-    .filter((instance) => instance.provider === "codex" && instance.enabled)
-    .toSorted((left, right) => {
-      if (left.isDefault !== right.isDefault) {
-        return left.isDefault ? -1 : 1;
-      }
-      return String(left.instanceId).localeCompare(String(right.instanceId));
-    })
-    .map((instance) => instance.instanceId);
-
-  if (input.selectedProvider === "codex") {
-    const selectedIndex = orderedInstanceIds.indexOf(input.selectedProviderInstanceId);
-    if (selectedIndex >= 0) {
-      orderedInstanceIds.splice(selectedIndex, 1);
-      orderedInstanceIds.unshift(input.selectedProviderInstanceId);
+  const driverByInstanceId = new Map<ProviderInstanceId, ProviderKind>();
+  for (const instance of input.providerInstances) {
+    if (VOICE_TRANSCRIPTION_DRIVERS.has(instance.provider)) {
+      driverByInstanceId.set(instance.instanceId, instance.provider);
     }
   }
+
+  const orderedIdsForDriver = (driver: ProviderKind): ProviderInstanceId[] => {
+    const ordered = input.providerInstances
+      .filter((instance) => instance.provider === driver && instance.enabled)
+      .toSorted((left, right) => {
+        if (left.isDefault !== right.isDefault) {
+          return left.isDefault ? -1 : 1;
+        }
+        return String(left.instanceId).localeCompare(String(right.instanceId));
+      })
+      .map((instance) => instance.instanceId);
+    if (input.selectedProvider === driver) {
+      const selectedIndex = ordered.indexOf(input.selectedProviderInstanceId);
+      if (selectedIndex >= 0) {
+        ordered.splice(selectedIndex, 1);
+        ordered.unshift(input.selectedProviderInstanceId);
+      }
+    }
+    return ordered;
+  };
+
+  const driverOrder = VOICE_TRANSCRIPTION_DRIVERS.has(input.selectedProvider)
+    ? [
+        input.selectedProvider,
+        ...[...VOICE_TRANSCRIPTION_DRIVERS].filter((d) => d !== input.selectedProvider),
+      ]
+    : [...VOICE_TRANSCRIPTION_DRIVERS];
+  const orderedCandidates = driverOrder.flatMap((driver) =>
+    orderedIdsForDriver(driver).map((instanceId) => ({ instanceId, provider: driver })),
+  );
 
   const isUsableVoiceStatus = (instanceId: ProviderInstanceId): boolean => {
     const status = statusByInstanceId.get(instanceId);
     return isProviderUsable(status);
   };
-  const capableInstanceId = orderedInstanceIds.find((instanceId) => {
+  const capable = orderedCandidates.find(({ instanceId }) => {
     const status = statusByInstanceId.get(instanceId);
     return isUsableVoiceStatus(instanceId) && status?.voiceTranscriptionAvailable === true;
   });
-  const fallbackInstanceId =
-    capableInstanceId ?? orderedInstanceIds.find((instanceId) => isUsableVoiceStatus(instanceId));
-  if (!fallbackInstanceId) {
+  const fallback =
+    capable ?? orderedCandidates.find(({ instanceId }) => isUsableVoiceStatus(instanceId));
+  if (!fallback) {
     return null;
   }
-  const status = statusByInstanceId.get(fallbackInstanceId);
-  return status ? { instanceId: fallbackInstanceId, status } : null;
+  const status = statusByInstanceId.get(fallback.instanceId);
+  const provider = driverByInstanceId.get(fallback.instanceId) ?? fallback.provider;
+  return status ? { instanceId: fallback.instanceId, provider, status } : null;
 }
 
 // Shared send gate used by chat, Kanban, shortcuts, and handoff flows.

@@ -213,19 +213,26 @@ it("treats an expires_at above 1e12 as milliseconds and caps the lifetime at 24 
   expect(calls).toBe(2);
 });
 
-it("falls back to a manual key only for a revoked device, never for transient errors", async () => {
+it("never falls back to a manual key for a device session, revoked or not", async () => {
   useTempTokenStore();
   await writeIishkoDeviceToken("idd_fallback");
   const env = { [IISHKO_API_KEY_ENV]: "sk-manual" };
   await expect(
     resolveIishkoApiKey(env, IISHKO_API_KEY_ENV, { request: async () => json(503, {}) }),
   ).rejects.toThrow(/unavailable/u);
-  expect(
-    await resolveIishkoApiKey(env, IISHKO_API_KEY_ENV, { request: async () => json(401, {}) }),
-  ).toBe("sk-manual");
+  // A revoked device stays revoked: the raw key must not silently replace it.
   await expect(
-    resolveIishkoApiKey({}, IISHKO_API_KEY_ENV, { request: async () => json(401, {}) }),
+    resolveIishkoApiKey(env, IISHKO_API_KEY_ENV, { request: async () => json(401, {}) }),
   ).rejects.toBeInstanceOf(IishkoDeviceRevokedError);
+  // Without a device token the raw key is returned as-is for the caller to gate.
+  await writeIishkoDeviceToken(null);
+  expect(
+    await resolveIishkoApiKey(env, IISHKO_API_KEY_ENV, {
+      request: async () => {
+        throw new Error("must not be called");
+      },
+    }),
+  ).toBe("sk-manual");
 });
 
 it.each([

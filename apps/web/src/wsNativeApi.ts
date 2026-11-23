@@ -1014,6 +1014,8 @@ export function createWsNativeApi(): NativeApi {
       connectApiKey: (input) => controller.request(WS_METHODS.iishkoConnectApiKey, input),
       signOut: () => controller.request(WS_METHODS.iishkoSignOut),
       profile: () => controller.request(WS_METHODS.iishkoProfile),
+      subagentsList: (input) => controller.request(WS_METHODS.iishkoSubagentsList, input ?? {}),
+      subagentsCreate: (input) => controller.request(WS_METHODS.iishkoSubagentsCreate, input),
     },
     telegramBridge: {
       status: () => controller.request(WS_METHODS.telegramBridgeStatus),

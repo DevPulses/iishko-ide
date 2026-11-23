@@ -6,22 +6,31 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  createAssistantMessageEventStream,
+  isContextOverflow,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+} from "@earendil-works/pi-ai";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { OutboundHttpRequest, OutboundHttpResponse } from "@iishko/shared/outboundHttp";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   IISHKO_DEFAULT_BASE_URL,
   IishkoAuthError,
   fetchIishkoModels,
+  isIishkoContextOverflowError,
   loadIishkoModels,
   mapIishkoGatewayError,
-  pickIishkoFallbackModelId,
   parseIishkoModels,
+  pickIishkoDefaultModelId,
   refreshPiIishkoModels,
   resolveIishkoBaseUrl,
+  wrapIishkoProviderStreams,
 } from "./iishkoProvider.ts";
 import { findModelInRegistry } from "./Layers/PiAdapter.ts";
+import { setIishkoDeviceTokenPath } from "../iishkoSession.ts";
 import { importTestPiPackage } from "./testing/piSdkFixture.ts";
 
 const GATEWAY_MODELS = {
@@ -76,13 +85,58 @@ describe("parseIishkoModels", () => {
       baseUrl: IISHKO_DEFAULT_BASE_URL,
       reasoning: false,
       input: ["text", "image"],
-      contextWindow: 200_000,
+      contextWindow: 400_000,
       maxTokens: 32_768,
       headers: { "X-IISHKO-Client": "iishko-ide/1.0.0" },
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       compat: { supportsDeveloperRole: false, maxTokensField: "max_tokens" },
     });
-    expect(models[1]).toMatchObject({ input: ["text"], contextWindow: 128_000 });
+    expect(models[1]).toMatchObject({ input: ["text"], contextWindow: 400_000 });
+  });
+
+  it("clamps context_length to the 400k ceiling and drops windows below 32k", () => {
+    const models = parseIishkoModels({
+      data: [
+        { id: "huge", context_length: 1_000_000, supported_endpoint_types: ["openai"] },
+        { id: "reported", context_length: 115_228, supported_endpoint_types: ["openai"] },
+        { id: "tiny", context_length: 22_000, supported_endpoint_types: ["openai"] },
+        { id: "floor", context_length: 32_000, supported_endpoint_types: ["openai"] },
+        { id: "junk-length", context_length: "wide", supported_endpoint_types: ["openai"] },
+      ],
+    });
+    expect(models.map((model) => model.id)).toEqual(["floor", "huge", "junk-length", "reported"]);
+    expect(models.find((model) => model.id === "huge")?.contextWindow).toBe(400_000);
+    expect(models.find((model) => model.id === "reported")?.contextWindow).toBe(115_228);
+    expect(models.find((model) => model.id === "floor")?.contextWindow).toBe(32_000);
+    expect(models.find((model) => model.id === "junk-length")?.contextWindow).toBe(400_000);
+  });
+
+  it("uses the catalogue display name and keeps the rank catalogue shape", () => {
+    const models = parseIishkoModels({
+      object: "list",
+      data: [
+        {
+          id: "deepseek-v4.1-flash",
+          object: "model",
+          created: 0,
+          owned_by: "iishko",
+          name: "DeepSeek V4.1 Flash",
+          context_length: 115_228,
+        },
+        { id: "plain-model", object: "model", owned_by: "iishko", name: "   " },
+        { id: "no-name", object: "model", owned_by: "iishko" },
+      ],
+    });
+    expect(models.map((model) => model.id)).toEqual([
+      "deepseek-v4.1-flash",
+      "no-name",
+      "plain-model",
+    ]);
+    expect(models.find((model) => model.id === "deepseek-v4.1-flash")?.name).toBe(
+      "DeepSeek V4.1 Flash",
+    );
+    expect(models.find((model) => model.id === "plain-model")?.name).toBe("plain-model");
+    expect(models.find((model) => model.id === "no-name")?.name).toBe("no-name");
   });
 
   it("rejects a payload without a model list", () => {
@@ -182,11 +236,27 @@ describe("refreshPiIishkoModels", () => {
     });
   }
 
+  // Isolate the device-token store so a real sign-in on this machine cannot leak in.
+  const tokenDirs: string[] = [];
+  beforeEach(() => {
+    const dir = mkdtempSync(path.join(tmpdir(), "iishko-provider-token-"));
+    tokenDirs.push(dir);
+    setIishkoDeviceTokenPath(path.join(dir, "device.json"));
+  });
+  afterEach(() => {
+    setIishkoDeviceTokenPath(undefined);
+    for (const dir of tokenDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   it("registers the gateway models with the instance key and resolves slugs with slashes", async () => {
     const request = vi.fn(async (_input: OutboundHttpRequest) => response(200, GATEWAY_MODELS));
     const modelRuntime = await runtime();
     await refreshPiIishkoModels(modelRuntime, importTestPiPackage, {
-      environment: { REFORMBOSS_API_KEY: `register-${Math.random()}` },
+      // The direct-API marker is what the 404 key-login fallback stores with a raw key.
+      environment: {
+        REFORMBOSS_API_KEY: `register-${Math.random()}`,
+        REFORMBOSS_DIRECT_API_KEY: "1",
+      },
       request,
     });
     expect(request).toHaveBeenCalledTimes(1);
@@ -211,11 +281,35 @@ describe("refreshPiIishkoModels", () => {
     });
     expect(request).not.toHaveBeenCalled();
     await refreshPiIishkoModels(modelRuntime, importTestPiPackage, {
-      environment: { REFORMBOSS_API_KEY: `rejected-${Math.random()}` },
+      environment: {
+        REFORMBOSS_API_KEY: `rejected-${Math.random()}`,
+        REFORMBOSS_DIRECT_API_KEY: "1",
+      },
       request,
     });
     expect(request).toHaveBeenCalledTimes(1);
     expect(modelRuntime.getModels("iishko")).toEqual([]);
+  });
+
+  it("never routes a raw key to the direct API without the marker or a base-URL override", async () => {
+    const request = vi.fn(async (_input: OutboundHttpRequest) => response(200, GATEWAY_MODELS));
+    const modelRuntime = await runtime();
+    await refreshPiIishkoModels(modelRuntime, importTestPiPackage, {
+      environment: { REFORMBOSS_API_KEY: `raw-${Math.random()}` },
+      request,
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(modelRuntime.getModels("iishko")).toEqual([]);
+    // The explicit development override is the only other way to reach a direct base.
+    await refreshPiIishkoModels(modelRuntime, importTestPiPackage, {
+      environment: {
+        REFORMBOSS_API_KEY: `dev-${Math.random()}`,
+        REFORMBOSS_API_BASE_URL: "https://staging.example.com/v1",
+      },
+      request,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(String(request.mock.calls[0]![0].url)).toBe("https://staging.example.com/v1/models");
   });
 });
 
@@ -225,8 +319,13 @@ describe("mapIishkoGatewayError", () => {
     ["402 Payment Required", "Лимит на сегодня исчерпан"],
     [
       '403 {"error":{"code":"ide_only","message":"x"}}',
-      "Для рангов Новичок и Актив модели доступны только при входе через Telegram в ИИШКО IDE",
+      "Для вашего ранга модели ИИШКО работают только после входа через Telegram: Настройки → Аккаунт ИИШКО → «Войти через Telegram».",
     ],
+    [
+      '403: {"message":"Для рангов «Новичок» и «Актив» прямой API временно закрыт, используйте ИИШКО IDE"}',
+      "Для рангов «Новичок» и «Актив» прямой API временно закрыт, используйте ИИШКО IDE",
+    ],
+    ['400: {"error":{"message":"Bad things","type":"x"}}', "Bad things"],
     ["429 Too Many Requests retry-after: 7", "Слишком много запросов, повтор через 7 с"],
     [
       '503 {"error":{"type":"upstream_pool_empty"}}',
@@ -250,20 +349,81 @@ describe("mapIishkoGatewayError", () => {
     expect(mapIishkoGatewayError(raw)).toBe(expected);
   });
 
-  it("keeps unknown messages raw", () => {
+  it("shows the gateway message for blocked accounts and keeps unknown non-JSON text raw", () => {
     expect(mapIishkoGatewayError("502 upstream_error: boom")).toBeNull();
     expect(mapIishkoGatewayError("")).toBeNull();
     expect(
       mapIishkoGatewayError('403 {"error":{"code":"ide_account_blocked","message":"x"}}'),
-    ).toBeNull();
+    ).toBe("x");
   });
 });
 
-describe("pickIishkoFallbackModelId", () => {
-  it("prefers the first preferred available model", () => {
-    expect(pickIishkoFallbackModelId(["zeta-chat", "kimi-k3", "claude-sonnet-5"])).toBe(
-      "claude-sonnet-5",
+describe("pickIishkoDefaultModelId", () => {
+  it("prefers the first available model of the default order, else the first listed", () => {
+    expect(pickIishkoDefaultModelId(["claude-opus-5-5", "glm-5.3", "kimi-k3"])).toBe("glm-5.3");
+    expect(pickIishkoDefaultModelId(["claude-opus-5-5", "deepseek-v4-flash", "glm-5.3"])).toBe(
+      "deepseek-v4-flash",
     );
-    expect(pickIishkoFallbackModelId([])).toBeUndefined();
+    expect(pickIishkoDefaultModelId(["odd-model", "other"])).toBe("odd-model");
+    // Vanished-selection fallback uses the same order: kimi beats unlisted claude-sonnet-5.
+    expect(pickIishkoDefaultModelId(["zeta-chat", "kimi-k3", "claude-sonnet-5"])).toBe("kimi-k3");
+    expect(pickIishkoDefaultModelId([])).toBeUndefined();
+  });
+});
+
+describe("IISHKO context overflow", () => {
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const errorMessage = (text: string): AssistantMessage =>
+    ({
+      role: "assistant",
+      content: [],
+      api: "openai-completions",
+      provider: "iishko",
+      model: "deepseek-v4-flash",
+      usage,
+      stopReason: "error",
+      errorMessage: text,
+      timestamp: Date.now(),
+    }) as AssistantMessage;
+  const makeInner = (text: string) => {
+    const stream = createAssistantMessageEventStream();
+    stream.push({ type: "error", reason: "error", error: errorMessage(text) });
+    stream.end();
+    return stream;
+  };
+
+  it("marks gateway ctxguard errors so pi-ai detects a context overflow", async () => {
+    // A bare ctxguard body carries no pattern pi-ai recognizes.
+    const ctxguard = '{"error":{"code":"ctxguard_115228","message":"too big"}}';
+    expect(isContextOverflow(errorMessage(ctxguard))).toBe(false);
+    expect(isIishkoContextOverflowError(ctxguard)).toBe(true);
+    expect(isIishkoContextOverflowError('413 {"error":{"code":"ctxguard_1"}}')).toBe(true);
+    expect(isIishkoContextOverflowError("429 rate limit exceeded")).toBe(false);
+    expect(isIishkoContextOverflowError("connection reset")).toBe(false);
+
+    const api = wrapIishkoProviderStreams(
+      { stream: () => makeInner(ctxguard), streamSimple: () => makeInner(ctxguard) },
+      createAssistantMessageEventStream,
+    );
+    const events: AssistantMessageEvent[] = [];
+    for await (const event of api.streamSimple({} as never, {} as never)) {
+      events.push(event);
+    }
+    const final = events.find((event) => event.type === "error");
+    expect(final?.type === "error" && final.error.errorMessage).toContain(
+      "context length exceeded",
+    );
+    if (final?.type === "error") {
+      expect(isContextOverflow(final.error)).toBe(true);
+    }
+    const result = await api.streamSimple({} as never, {} as never).result();
+    expect(isContextOverflow(result)).toBe(true);
   });
 });

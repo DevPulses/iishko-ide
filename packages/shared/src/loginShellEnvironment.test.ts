@@ -21,6 +21,7 @@ vi.mock("node:os", async (importOriginal) => {
   };
 });
 
+import { DEFAULT_IISHKO_HOME_DIRECTORY_NAME } from "./iishkoHome";
 import {
   createCachedLoginShellEnvironmentReader,
   createCachedLoginShellPathReader,
@@ -361,10 +362,15 @@ describe("createCachedLoginShellEnvironmentReader", () => {
 describe("loginShellEnvironmentCachePath", () => {
   it("anchors the cache in the IISHKO home both processes resolve", () => {
     expect(loginShellEnvironmentCachePath({ env: { IISHKO_HOME: "/tmp/iishko-home" } })).toBe(
-      Path.join("/tmp/iishko-home", "cache", "login-shell-environment.json"),
+      Path.join(Path.resolve("/tmp/iishko-home"), "cache", "login-shell-environment.json"),
     );
     expect(loginShellEnvironmentCachePath({ env: {}, homeDirectory: "/users/test" })).toBe(
-      Path.join("/users/test", ".iishko", "cache", "login-shell-environment.json"),
+      Path.join(
+        "/users/test",
+        DEFAULT_IISHKO_HOME_DIRECTORY_NAME,
+        "cache",
+        "login-shell-environment.json",
+      ),
     );
   });
 });

@@ -70,15 +70,17 @@ import {
 } from "../../agentGateway/sessionLease.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import { ServerConfig } from "../../config.ts";
-import { refreshIishkoSessionOnce } from "../../iishkoSession.ts";
+import { iishkoHomeDir, refreshIishkoSessionOnce } from "../../iishkoSession.ts";
 import {
   IISHKO_PROVIDER_ID,
   isIishkoUnauthorizedError,
   mapIishkoGatewayError,
-  pickIishkoFallbackModelId,
+  pickIishkoDefaultModelId,
   refreshPiIishkoModels,
 } from "../iishkoProvider.ts";
 import { resolvePiInstallation, type PiPackageImporter } from "../piSdkImports.ts";
+import { createPiSubagentTool, discoverPiSubagents, runPiSubagentTask } from "../piSubagents.ts";
+import { transcribeIishkoVoice } from "../iishkoVoice.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
   ProviderAdapterRequestError,
@@ -3311,7 +3313,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         if (input.modelId && !model && requested?.provider === IISHKO_PROVIDER_ID) {
           // The selected IISHKO model vanished (rank change, gateway catalog): use the first
           // preferred model that is still listed, including one served from the stale cache.
-          const fallbackId = pickIishkoFallbackModelId(
+          const fallbackId = pickIishkoDefaultModelId(
             registry
               .getAll()
               .filter((candidate) => candidate.provider === IISHKO_PROVIDER_ID)
@@ -3332,6 +3334,45 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         const shellPath = services.settingsManager.getShellPath();
         const commandPrefix = services.settingsManager.getShellCommandPrefix();
         input.processSupervisor.setShellPath(shellPath);
+        const supervisedBashTool = input.sdk.defineTool(
+          input.sdk.createBashToolDefinition(cwd, {
+            operations: input.processSupervisor.operations,
+            ...(commandPrefix === undefined ? {} : { commandPrefix }),
+            ...(shellPath === undefined ? {} : { shellPath }),
+          }),
+        );
+        const subagentAgents = await discoverPiSubagents({
+          agentsHomeDir: iishkoHomeDir(),
+          cwd,
+          onWarn: (message, filePath) =>
+            console.warn(`[pi.subagents] ${message}${filePath ? `: ${filePath}` : ""}`),
+        });
+        const subagentThinkingLevel = input.thinkingLevel ?? DEFAULT_PI_THINKING_LEVEL;
+        const subagentTool =
+          subagentAgents.length > 0
+            ? createPiSubagentTool({
+                agents: subagentAgents,
+                runTask: (agent, task, signal, onUpdate) =>
+                  runPiSubagentTask(
+                    {
+                      createAgentSessionServices: (options) =>
+                        input.sdk.createAgentSessionServices(options),
+                      createAgentSessionFromServices: (options) =>
+                        input.sdk.createAgentSessionFromServices(options),
+                      sessionManagerInMemory: (dir) => input.sdk.SessionManager.inMemory(dir),
+                      services,
+                      parentModel: model,
+                      thinkingLevel: subagentThinkingLevel,
+                      resolveModel: (modelRef) => findModelInRegistry(registry, modelRef),
+                      bashTool: supervisedBashTool,
+                    },
+                    agent,
+                    task,
+                    signal,
+                    onUpdate,
+                  ),
+              })
+            : undefined;
         return {
           ...(await input.sdk.createAgentSessionFromServices({
             services,
@@ -3340,13 +3381,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             ...(model ? { model } : {}),
             thinkingLevel: input.thinkingLevel ?? DEFAULT_PI_THINKING_LEVEL,
             customTools: [
-              input.sdk.defineTool(
-                input.sdk.createBashToolDefinition(cwd, {
-                  operations: input.processSupervisor.operations,
-                  ...(commandPrefix === undefined ? {} : { commandPrefix }),
-                  ...(shellPath === undefined ? {} : { shellPath }),
-                }),
-              ),
+              supervisedBashTool,
+              ...(subagentTool ? [subagentTool] : []),
               ...(input.gatewayTools ?? []),
             ],
           })),
@@ -4313,6 +4349,27 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       listSkills,
       listCommands,
       getComposerCapabilities,
+      transcribeVoice: (input) =>
+        Effect.tryPromise({
+          try: async () => {
+            // Voice dictation rides the built-in IISHKO instance only; custom Pi
+            // instances (CLI drivers, OpenAI-compatible configs) have no session.
+            const instanceId = input.providerInstanceId ?? PROVIDER;
+            if (instanceId !== PROVIDER) {
+              throw new Error(
+                `Voice transcription is unavailable for provider instance '${instanceId}'.`,
+              );
+            }
+            return await transcribeIishkoVoice(input);
+          },
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "voice/transcribe",
+              detail: toMessage(cause, "Voice transcription failed."),
+              cause,
+            }),
+        }),
       get streamEvents() {
         return Stream.fromQueue(runtimeEventQueue);
       },

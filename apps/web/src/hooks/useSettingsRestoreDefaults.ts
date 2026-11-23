@@ -59,7 +59,7 @@ export function useSettingsRestoreDefaults({
     );
 
   const changedSettingLabels = [
-    ...(theme !== "light" ? ["onboarding:changed_theme"] : []),
+    ...(theme !== "dark" ? ["onboarding:changed_theme"] : []),
     // resetAllThemes() restores both theme packs and the system-font preference.
     ...(!isDefaultThemePack("dark") ? ["settings:darkThemePack"] : []),
     ...(!isDefaultThemePack("light") ? ["settings:lightThemePack"] : []),
