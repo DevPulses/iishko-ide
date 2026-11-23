@@ -108,7 +108,10 @@ class FakeKeyboardEvent extends Event {
   }
 }
 const fakeWindow = new EventTarget();
-const fakeDocument = { activeElement: null as unknown };
+const fakeDocument = {
+  activeElement: null as unknown,
+  documentElement: { lang: "" },
+};
 vi.stubGlobal("window", fakeWindow);
 vi.stubGlobal("document", fakeDocument);
 vi.stubGlobal("Element", FakeElement);

@@ -327,6 +327,8 @@
   "supportIishko": "Support IISHKO",
   "theme_systemDefault": "System default",
   "theme_imported": "Theme imported",
+  "theme_fallback_title": "Theme could not be applied",
+  "theme_fallback_description": "The saved theme failed to load, so the default dark theme is active. You can pick or import a theme again in Settings.",
   "threadRenamed": "Thread renamed",
   "unknownError": "Unknown error.",
   "use2": "Use {{value0}}",

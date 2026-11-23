@@ -158,7 +158,7 @@ describe("external MCP stdio bridge", () => {
 
   it("fails clearly for missing and multiple running instances", () => {
     const baseDir = makeBaseDir();
-    expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/No running Iishko instance/);
+    expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/No running IISHKO instance/);
     writeRuntime(baseDir, "userdata", 3773);
     writeRuntime(baseDir, "dev", 4773);
     expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/Multiple running Iishko instances/);

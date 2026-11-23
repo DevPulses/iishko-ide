@@ -332,6 +332,8 @@ import {
   ProviderListAgentsResult,
   ProviderListCommandsInput,
   ProviderListCommandsResult,
+  ProviderListEndpointModelsInput,
+  ProviderListEndpointModelsResult,
   ProviderListModelsInput,
   ProviderListModelsResult,
   ProviderListPluginsInput,
@@ -1806,6 +1808,12 @@ export const WsProviderListAgentsRpc = Rpc.make(WS_METHODS.providerListAgents, {
   error: WsRpcError,
 });
 
+export const WsProviderListEndpointModelsRpc = Rpc.make(WS_METHODS.providerListEndpointModels, {
+  payload: ProviderListEndpointModelsInput,
+  success: ProviderListEndpointModelsResult,
+  error: WsRpcError,
+});
+
 export const WsAccountStatusRpc = Rpc.make(WS_METHODS.accountStatus, {
   payload: Schema.Struct({}),
   success: AccountStatus,
@@ -2560,6 +2568,7 @@ export type WsFeatureRpc =
   | typeof WsProviderReadPluginRpc
   | typeof WsProviderListModelsRpc
   | typeof WsProviderListAgentsRpc
+  | typeof WsProviderListEndpointModelsRpc
   | typeof WsAccountStatusRpc
   | typeof WsAccountBillingStatusRpc
   | typeof WsAccountBillingCheckoutRpc
@@ -2778,6 +2787,7 @@ const wsApplicationRpcGroup = RpcGroup.make(
   WsProviderReadPluginRpc,
   WsProviderListModelsRpc,
   WsProviderListAgentsRpc,
+  WsProviderListEndpointModelsRpc,
   WsAccountStatusRpc,
   WsAccountBillingStatusRpc,
   WsAccountBillingCheckoutRpc,

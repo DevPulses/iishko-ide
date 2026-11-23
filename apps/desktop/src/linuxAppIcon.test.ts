@@ -90,9 +90,9 @@ describe("resolveLinuxDesktopIconName", () => {
   it("keeps the entry it finds first authoritative", () => {
     const dataHome = temporaryDirectory();
     const dataDir = temporaryDirectory();
-    const stableFile = "iishko.desktop";
+    const stableFile = "iishko-ide.desktop";
     writeDesktopEntry(dataHome, stableFile, desktopEntry("Icon=/tmp/custom.png"));
-    writeDesktopEntry(dataDir, stableFile, desktopEntry("Icon=iishko"));
+    writeDesktopEntry(dataDir, stableFile, desktopEntry("Icon=iishko-ide"));
 
     expect(
       resolveLinuxDesktopIconName({
@@ -109,7 +109,7 @@ describe("resolveLinuxDesktopIconName", () => {
     const env = { XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: dataDir };
     const homeDir = temporaryDirectory();
     const flavors = [
-      ["production", "iishko"],
+      ["production", "iishko-ide"],
       ["beta", "iishko-beta"],
       ["canary", "iishko-canary"],
       ["cua", "iishko-cua"],
@@ -164,7 +164,7 @@ describe("resolveLinuxDesktopIconName", () => {
   });
 });
 
-describe("linuxDataHome", () => {
+describe.skipIf(process.platform === "win32")("linuxDataHome", () => {
   it("uses an absolute XDG_DATA_HOME and ignores a relative one", () => {
     expect(linuxDataHome({ XDG_DATA_HOME: "/data/home" }, "/home/gabriel")).toBe("/data/home");
     expect(linuxDataHome({ XDG_DATA_HOME: "crumbs" }, "/home/gabriel")).toBe(

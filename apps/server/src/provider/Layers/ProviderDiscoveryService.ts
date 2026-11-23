@@ -116,7 +116,7 @@ const PROVIDER_DISCOVERY_OPTION_KEYS = {
   grok: ["binaryPath", "environment"],
   droid: ["binaryPath", "environment"],
   opencode: ["binaryPath", "serverUrl", "serverPassword", "experimentalWebSockets", "environment"],
-  pi: ["binaryPath", "agentDir", "environment"],
+  pi: ["binaryPath", "agentDir", "environment", "customProviders"],
   omp: ["binaryPath", "agentDir", "environment"],
 } as const satisfies Record<ProviderKind, readonly string[]>;
 

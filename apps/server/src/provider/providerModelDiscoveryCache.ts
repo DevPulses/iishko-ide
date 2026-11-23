@@ -60,6 +60,11 @@ export interface ProviderModelDiscoveryCacheKey {
    * set this today.
    */
   readonly configFingerprint?: string | null;
+  /**
+   * Serialized custom OpenCode-compatible endpoint specs. Editing the endpoint
+   * or its model list must not be masked by the fresh/stale windows.
+   */
+  readonly customProvidersKey?: string | null;
 }
 
 function hashCacheComponent(value: string): string {
@@ -130,6 +135,7 @@ export function providerModelDiscoveryCacheKey(
     experimentalWebSockets: input.experimentalWebSockets === true,
     environmentKey: environmentFingerprint(input.environment),
     cwd: input.cwd ?? null,
+    ...(input.customProviders ? { customProvidersKey: JSON.stringify(input.customProviders) } : {}),
   };
 }
 
@@ -158,6 +164,7 @@ export const serializeProviderModelDiscoveryCacheKey = (
     key.cwd,
     ...(key.runtimeVersion !== undefined ? [key.runtimeVersion] : []),
     ...(key.configFingerprint !== undefined ? [key.configFingerprint] : []),
+    ...(key.customProvidersKey !== undefined ? [key.customProvidersKey] : []),
   ]);
 
 /**

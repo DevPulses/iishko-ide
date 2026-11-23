@@ -469,3 +469,153 @@ describe("providerImportedDirectoryConfig", () => {
     });
   });
 });
+
+describe("providerStartOptionsFromInstance custom OpenAI-compatible providers", () => {
+  const openAiSettings = (
+    instanceId: string,
+    overrides?: {
+      readonly apiKeyEnv?: string;
+      readonly apiKey?: string;
+      readonly baseUrl?: string;
+      readonly models?: ReadonlyArray<Record<string, unknown>>;
+    },
+  ): ServerSettings => ({
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: {
+      [instanceId]: {
+        driver: "pi",
+        displayName: "Custom endpoint",
+        enabled: true,
+        environment: [
+          {
+            name: overrides?.apiKeyEnv ?? "IISHKO_CUSTOM_API_KEY",
+            value: overrides?.apiKey ?? "sk-instance-key",
+            sensitive: true,
+          },
+        ],
+        config: {
+          kind: "openai-compatible",
+          baseUrl: overrides?.baseUrl ?? "https://api.example.com/v1",
+          models: overrides?.models ?? [{ id: "model-a", name: "Model A", contextWindow: 64000 }],
+          ...(overrides?.apiKeyEnv ? { apiKeyEnv: overrides.apiKeyEnv } : {}),
+        },
+      },
+    },
+  });
+
+  it("emits pi.customProviders with the instance-scoped id and default key env", () => {
+    const resolved = resolveProviderInstance(openAiSettings("pi_work"), {
+      provider: "pi",
+      instanceId: providerInstanceId("pi_work"),
+    });
+    const options = providerStartOptionsFromInstance(resolved!);
+    expect(options?.pi?.customProviders).toEqual([
+      {
+        id: "custom-pi_work",
+        name: "Custom endpoint",
+        baseUrl: "https://api.example.com/v1",
+        models: [{ id: "model-a", name: "Model A", contextWindow: 64000 }],
+        apiKeyEnv: "IISHKO_CUSTOM_API_KEY",
+      },
+    ]);
+    expect(options?.pi?.environment).toEqual({ IISHKO_CUSTOM_API_KEY: "sk-instance-key" });
+  });
+
+  it("honors a custom apiKeyEnv and drops invalid model rows", () => {
+    const resolved = resolveProviderInstance(
+      openAiSettings("pi_alt", {
+        apiKeyEnv: "MY_PROVIDER_KEY",
+        apiKey: "sk-alt",
+        models: [{ id: "ok", contextWindow: 100 }, { name: "no id" }, { id: 42 }],
+      }),
+      { provider: "pi", instanceId: providerInstanceId("pi_alt") },
+    );
+    const options = providerStartOptionsFromInstance(resolved!);
+    expect(options?.pi?.customProviders?.[0]).toMatchObject({
+      apiKeyEnv: "MY_PROVIDER_KEY",
+      models: [{ id: "ok", contextWindow: 100 }],
+    });
+    expect(options?.pi?.environment).toEqual({ MY_PROVIDER_KEY: "sk-alt" });
+  });
+
+  it("keeps two custom instances' keys in their own environments", () => {
+    const settings: ServerSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        pi_one: {
+          driver: "pi",
+          enabled: true,
+          environment: [{ name: "IISHKO_CUSTOM_API_KEY", value: "key-one", sensitive: true }],
+          config: {
+            kind: "openai-compatible",
+            baseUrl: "https://one.example.com/v1",
+            models: [{ id: "m" }],
+          },
+        },
+        pi_two: {
+          driver: "pi",
+          enabled: true,
+          environment: [{ name: "IISHKO_CUSTOM_API_KEY", value: "key-two", sensitive: true }],
+          config: {
+            kind: "openai-compatible",
+            baseUrl: "https://two.example.com/v1",
+            models: [{ id: "m" }],
+          },
+        },
+      },
+    };
+    const one = resolveProviderInstance(settings, {
+      provider: "pi",
+      instanceId: providerInstanceId("pi_one"),
+    });
+    const two = resolveProviderInstance(settings, {
+      provider: "pi",
+      instanceId: providerInstanceId("pi_two"),
+    });
+    expect(providerStartOptionsFromInstance(one!)?.pi?.environment).toEqual({
+      IISHKO_CUSTOM_API_KEY: "key-one",
+    });
+    expect(providerStartOptionsFromInstance(two!)?.pi?.environment).toEqual({
+      IISHKO_CUSTOM_API_KEY: "key-two",
+    });
+    expect(providerStartOptionsFromInstance(one!)?.pi?.customProviders?.[0]?.id).toBe(
+      "custom-pi_one",
+    );
+    expect(providerStartOptionsFromInstance(two!)?.pi?.customProviders?.[0]?.id).toBe(
+      "custom-pi_two",
+    );
+  });
+
+  it("does not emit customProviders for a regular pi instance or a non-pi driver", () => {
+    const regular = resolveProviderInstance(
+      {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: { pi_plain: { driver: "pi", enabled: true } },
+      },
+      { provider: "pi", instanceId: providerInstanceId("pi_plain") },
+    );
+    expect(providerStartOptionsFromInstance(regular!)).toBeUndefined();
+
+    const cli = resolveProviderInstance(
+      {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          omp_work: {
+            driver: "omp",
+            enabled: true,
+            config: {
+              binaryPath: "/opt/omp",
+              kind: "openai-compatible",
+              baseUrl: "https://x",
+              models: [{ id: "m" }],
+            },
+          },
+        },
+      },
+      { provider: "omp", instanceId: providerInstanceId("omp_work") },
+    );
+    const ompOptions = providerStartOptionsFromInstance(cli!)?.omp;
+    expect(ompOptions).toBeDefined();
+    expect(ompOptions).not.toHaveProperty("customProviders");
+  });
+});

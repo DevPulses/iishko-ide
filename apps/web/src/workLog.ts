@@ -2182,6 +2182,15 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.labelTranslation = { message, values: { value0: name ? ` · ${name}` : "" } };
     if (outcome === "failed") entry.tone = "error";
   }
+  if (activity.kind === "model.rerouted") {
+    entry.labelTranslation = {
+      message: "chat:modelSwitched",
+      values: {
+        fromModel: asTrimmedString(payload?.fromModel) ?? "",
+        toModel: asTrimmedString(payload?.toModel) ?? "",
+      },
+    };
+  }
   if (activity.kind === "auth.status") {
     entry.collapseKey = `auth:${asTrimmedString(payload?.provider) ?? "provider"}`;
   }

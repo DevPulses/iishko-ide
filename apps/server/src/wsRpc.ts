@@ -282,6 +282,7 @@ import {
 import { makeAccountRpcHandlers } from "./wsAccountRpc";
 import { makeIishkoAccount } from "./iishkoAccount";
 import { makeIishkoAccountRpcHandlers } from "./wsIishkoAccountRpc";
+import { makeProviderEndpointRpcHandlers } from "./wsProviderEndpointRpc";
 import { makeTelegramBridge } from "./telegramBridge/bridge";
 import { makeTelegramOrchestrationPort } from "./telegramBridge/orchestrationPort";
 import { makeTelegramBridgeRpcHandlers } from "./wsTelegramRpc";
@@ -1338,6 +1339,9 @@ const makeWsRpcHandlersLayer = () =>
           refreshProviders: () => Effect.runPromise(providerHealth.refresh.pipe(Effect.asVoid)),
         }),
       );
+      const providerEndpointRpcHandlers = makeProviderEndpointRpcHandlers({
+        readSettings: () => Effect.runPromise(serverSettings.getSettings),
+      });
       const TELEGRAM_TOKEN_ENV = "IISHKO_TELEGRAM_BOT_TOKEN";
       const readTelegramEnvironment = async () => {
         const settings = await Effect.runPromise(serverSettings.getSettings);
@@ -3232,6 +3236,7 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(providerDiscoveryService.listAgents(input), "Failed to list agents"),
         ...accountRpcHandlers,
         ...iishkoAccountRpcHandlers,
+        ...providerEndpointRpcHandlers,
         ...telegramBridgeRpcHandlers,
         ...hostsRpcHandlers,
         [WS_METHODS.automationList]: (input) =>

@@ -4,9 +4,13 @@
 // Exports: provider discovery schemas and inferred types used by the WS/native API.
 
 import { Schema } from "effect";
-import { ProcessEnvRecord, TrimmedNonEmptyString } from "./baseSchemas";
+import { NonNegativeInt, ProcessEnvRecord, TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderOptionDescriptor } from "./model";
-import { ProviderInstanceId } from "./providerInstance";
+import {
+  ProviderCustomEndpointSpec,
+  ProviderCustomModelSpec,
+  ProviderInstanceId,
+} from "./providerInstance";
 
 const ProviderDiscoveryKind = Schema.Literals([
   "codex",
@@ -291,9 +295,29 @@ export const ProviderListModelsInput = Schema.Struct({
   serverPassword: Schema.optional(TrimmedNonEmptyString),
   experimentalWebSockets: Schema.optional(Schema.Boolean),
   environment: Schema.optional(ProcessEnvRecord),
+  customProviders: Schema.optional(Schema.Array(ProviderCustomEndpointSpec)),
   cwd: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProviderListModelsInput = typeof ProviderListModelsInput.Type;
+
+// "Load models" probe for a custom OpenAI-compatible endpoint. `apiKey` is a
+// one-shot credential supplied by the settings dialog; it is never persisted
+// or returned. `instanceId` lets the server fall back to the key already
+// stored in that instance's environment.
+export const ProviderListEndpointModelsInput = Schema.Struct({
+  baseUrl: TrimmedNonEmptyString,
+  apiKey: Schema.optional(TrimmedNonEmptyString),
+  instanceId: Schema.optional(ProviderInstanceId),
+});
+export type ProviderListEndpointModelsInput = typeof ProviderListEndpointModelsInput.Type;
+
+export const ProviderEndpointModelInfo = ProviderCustomModelSpec;
+export type ProviderEndpointModelInfo = ProviderCustomModelSpec;
+
+export const ProviderListEndpointModelsResult = Schema.Struct({
+  models: Schema.Array(ProviderEndpointModelInfo),
+});
+export type ProviderListEndpointModelsResult = typeof ProviderListEndpointModelsResult.Type;
 
 export const ProviderReasoningEffortDescriptor = Schema.Struct({
   value: TrimmedNonEmptyString,

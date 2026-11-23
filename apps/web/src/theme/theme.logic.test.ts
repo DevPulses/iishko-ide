@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  consumeThemeFallbackNotice,
   DEFAULT_THEME_STATE,
   buildResolvedThemeTokens,
   buildThemeCssVariables,
@@ -82,6 +83,22 @@ describe("parseStoredThemeState", () => {
       expect(parseStoredThemeState(JSON.stringify(saved))).toEqual(saved);
     },
   );
+
+  it("falls back to defaults and raises a one-time notice for a corrupt stored theme", () => {
+    consumeThemeFallbackNotice();
+    const state = parseStoredThemeState('{"chromeThemes": {"dark": {"accent": "#fff"');
+    expect(state).toEqual(DEFAULT_THEME_STATE);
+    expect(consumeThemeFallbackNotice()).toBe(true);
+    expect(consumeThemeFallbackNotice()).toBe(false);
+  });
+
+  it("does not raise a notice for absent or valid stored themes", () => {
+    consumeThemeFallbackNotice();
+    parseStoredThemeState(null);
+    parseStoredThemeState("dark");
+    parseStoredThemeState(JSON.stringify(DEFAULT_THEME_STATE));
+    expect(consumeThemeFallbackNotice()).toBe(false);
+  });
 
   it("resets only the selected variant to IISHKO when explicitly requested", () => {
     const saved = parseStoredThemeState("dark");

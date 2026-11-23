@@ -5,6 +5,7 @@
 
 import type {
   ModelSelection,
+  ProviderCustomEndpointSpec,
   ProviderDriverKind,
   ProviderInstanceConfig,
   ProviderInstanceConfigMap,
@@ -522,6 +523,57 @@ export function resolveProviderInstance(
   );
 }
 
+const CUSTOM_PROVIDER_KIND = "openai-compatible";
+const CUSTOM_PROVIDER_DEFAULT_API_KEY_ENV = "IISHKO_CUSTOM_API_KEY";
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// A pi instance whose config declares an OpenAI-compatible endpoint becomes a
+// custom provider inside the Pi runtime. The endpoint spec is routing data
+// only: the bearer key stays in the instance environment under `apiKeyEnv`.
+function piCustomProvidersFromInstance(
+  instance: ResolvedProviderInstance,
+): ProviderCustomEndpointSpec[] | undefined {
+  if (trimString(instance.config.kind) !== CUSTOM_PROVIDER_KIND) {
+    return undefined;
+  }
+  const baseUrl = trimString(instance.config.baseUrl);
+  if (!baseUrl) {
+    return undefined;
+  }
+  const rawModels = Array.isArray(instance.config.models) ? instance.config.models : [];
+  const models = rawModels.flatMap((entry) => {
+    if (!isRecordValue(entry)) return [];
+    const id = trimString(entry.id);
+    if (!id) return [];
+    const name = trimString(entry.name);
+    const contextWindow = entry.contextWindow;
+    return [
+      {
+        id,
+        ...(name ? { name } : {}),
+        ...(typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+          ? { contextWindow: Math.floor(contextWindow) }
+          : {}),
+      },
+    ];
+  });
+  if (models.length === 0) {
+    return undefined;
+  }
+  return [
+    {
+      id: `custom-${instance.instanceId}`,
+      name: instance.displayName,
+      baseUrl,
+      models,
+      apiKeyEnv: trimString(instance.config.apiKeyEnv) || CUSTOM_PROVIDER_DEFAULT_API_KEY_ENV,
+    },
+  ];
+}
+
 export function providerStartOptionsFromInstance(
   instance: ResolvedProviderInstance,
 ): ProviderStartOptions | undefined {
@@ -631,12 +683,14 @@ export function providerStartOptionsFromInstance(
     }
     case "pi": {
       const agentDir = trimString(config.agentDir) || profileDir;
-      return binaryPath || agentDir || environment.environment
+      const customProviders = piCustomProvidersFromInstance(instance);
+      return binaryPath || agentDir || environment.environment || customProviders
         ? {
             pi: {
               ...environment,
               ...(binaryPath ? { binaryPath } : {}),
               ...(agentDir ? { agentDir } : {}),
+              ...(customProviders ? { customProviders } : {}),
             },
           }
         : undefined;

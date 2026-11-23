@@ -20,7 +20,7 @@ import {
   PiModelOptions,
   DEFAULT_MODEL_BY_PROVIDER,
 } from "./model";
-import { ProviderInstanceId } from "./providerInstance";
+import { ProviderCustomEndpointSpec, ProviderInstanceId } from "./providerInstance";
 import {
   UsageLimitRecovery,
   UsageLimitRecoveryFields,
@@ -446,6 +446,7 @@ export const PiProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   agentDir: Schema.optional(TrimmedNonEmptyString),
   environment: Schema.optional(ProcessEnvRecord),
+  customProviders: Schema.optional(Schema.Array(ProviderCustomEndpointSpec)),
 });
 export const OmpProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),

@@ -169,7 +169,7 @@ it.layer(NodeServices.layer)("Codex text-generation isolation", (it) => {
           systemConfigPaths: ["/etc/codex/config.toml"],
           fileExists: () => true,
         }),
-      ).toThrowError(/outside Iishko's isolated home/);
+      ).toThrowError(/outside IISHKO's isolated home/);
       expect(() =>
         assertNoExternalCodexConfigLayers({
           platform: "darwin",

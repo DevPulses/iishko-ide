@@ -1,0 +1,97 @@
+# FILE: ci.yml
+# Purpose: Pull-request and main-branch gate for ИИШКО IDE on the self-hosted
+#   Windows runner (label windows:host, capacity 1).
+# Layer: CI workflow
+#
+# The upstream test suite is Linux-shaped, so the full `linux-tests` job runs
+# inside WSL through scripts/ci/run-wsl-tests.sh and is non-blocking until
+# scripts/ci/wsl-test-exclusions.txt lists the proven-baseline failures. The
+# ИИШКО-owned suites (`iishko-tests`) are platform-independent unit tests and
+# run blocking on the Windows host. `windows-checks` runs the fast static
+# gates: fmt:check, lint, typecheck, brand and i18n. All jobs share the single
+# capacity-1 runner and therefore serialize.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows-checks:
+    runs-on: windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure Bun 1.4.5
+        shell: pwsh
+        run: |
+          $bunVersion = "1.4.5"
+          $toolCache = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { Join-Path $env:LOCALAPPDATA "iishko-ci\tool-cache" }
+          $toolRoot = Join-Path $toolCache "bun\$bunVersion\x64"
+          # The release zip nests its payload under bun-windows-x64/.
+          $bunDir = Join-Path $toolRoot "bun-windows-x64"
+          $bunExe = Join-Path $bunDir "bun.exe"
+          if (-not (Test-Path $bunExe)) {
+            New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+            $zip = Join-Path $env:RUNNER_TEMP "bun-windows-x64.zip"
+            Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v$bunVersion/bun-windows-x64.zip" -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath $toolRoot -Force
+          }
+          # PATH changes do not survive into later steps; GITHUB_PATH does.
+          $env:PATH = "$bunDir;$env:PATH"
+          $bunDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          bun --version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Format check
+        run: bun run fmt:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Brand check
+        run: bun run brand:check
+
+      - name: i18n check
+        run: bun run i18n:check
+
+  iishko-tests:
+    runs-on: windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ИИШКО suites inside WSL
+        shell: pwsh
+        run: |
+          # The ИИШКО-owned suites are platform-independent but the repo's
+          # toolchain is Linux-shaped, so they run in the same WSL mirror as
+          # the full suite (IISHKO_TARGETED=1 selects only these files).
+          $win = $PWD.Path
+          $wslPath = "/mnt/" + $win.Substring(0,1).ToLower() + ($win.Substring(2) -replace '\\','/')
+          wsl.exe -e bash -lc "IISHKO_TARGETED=1 bash '$wslPath/scripts/ci/run-wsl-tests.sh' '$wslPath'"
+
+  linux-tests:
+    runs-on: windows
+    # Non-blocking until scripts/ci/wsl-test-exclusions.txt lists the
+    # proven-baseline failures; then drop continue-on-error.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run test suite inside WSL
+        shell: pwsh
+        run: |
+          # Convert C:\path to /mnt/c/path for the WSL side.
+          $win = $PWD.Path
+          $wslPath = "/mnt/" + $win.Substring(0,1).ToLower() + ($win.Substring(2) -replace '\\','/')
+          wsl.exe -e bash -lc "bash '$wslPath/scripts/ci/run-wsl-tests.sh' '$wslPath'"

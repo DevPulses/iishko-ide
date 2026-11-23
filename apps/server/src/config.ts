@@ -185,7 +185,7 @@ export function resolveDefaultChatWorkspaceRoot(input: {
   const homeDir = input.homeDir.trim();
   const platform = input.platform ?? process.platform;
   const pathApi = platform === "win32" ? pathWin32 : pathPosix;
-  return pathApi.join(homeDir, "Documents", "Iishko");
+  return pathApi.join(homeDir, "Documents", "IISHKO");
 }
 
 export function resolveDefaultStudioWorkspaceRoot(input: {

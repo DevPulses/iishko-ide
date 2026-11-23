@@ -11,6 +11,7 @@
 import * as OS from "node:os";
 import nodePath from "node:path";
 import type {
+  ProviderCustomEndpointSpec,
   ProviderInstanceId,
   ServerSettings,
   ServerProviderAuthStatus,
@@ -1965,6 +1966,31 @@ export const checkOpenCodeProviderStatus = makeCheckOpenCodeProviderStatus();
 
 // ── Pi health check ─────────────────────────────────────────────
 
+// An OpenAI-compatible instance authenticates per request with the API key from
+// its own environment (or runs keyless); the Pi CLI installation and sign-in
+// probes do not apply to it.
+export const checkPiCustomProviderStatus = (
+  customProviders: ReadonlyArray<ProviderCustomEndpointSpec>,
+  environment?: Readonly<Record<string, string>>,
+): ServerProviderStatus => {
+  const checkedAt = new Date().toISOString();
+  const keyEnvNames = customProviders
+    .map((spec) => spec.apiKeyEnv)
+    .filter((name): name is string => typeof name === "string" && name.length > 0);
+  const missingKey = keyEnvNames.some((name) => nonEmptyTrimmed(environment?.[name]) === undefined);
+  const baseUrl = customProviders[0]?.baseUrl;
+  return {
+    provider: PI_PROVIDER,
+    instanceId: PI_PROVIDER,
+    driver: PI_PROVIDER,
+    status: "ready" as const,
+    available: true,
+    authStatus: missingKey ? ("unknown" as const) : ("authenticated" as const),
+    checkedAt,
+    message: baseUrl ? `OpenAI-compatible endpoint: ${baseUrl}` : "OpenAI-compatible endpoint.",
+  } satisfies ServerProviderStatus;
+};
+
 export const checkPiProviderStatus = (
   agentDir?: string,
   binaryPath?: string,
@@ -3473,6 +3499,14 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
           }
           case "pi": {
             const piOptions = providerStartOptionsFromInstance(instance)?.pi;
+            if (piOptions?.customProviders !== undefined && piOptions.customProviders.length > 0) {
+              return checkProviderInstanceWhenEnabled(
+                instance,
+                Effect.succeed(
+                  checkPiCustomProviderStatus(piOptions.customProviders, piOptions.environment),
+                ),
+              );
+            }
             return checkProviderInstanceWhenEnabled(
               instance,
               checkPiProviderStatus(

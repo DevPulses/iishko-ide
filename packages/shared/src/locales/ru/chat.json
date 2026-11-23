@@ -632,6 +632,7 @@
   "couldNotDeleteSideChat": "Не удалось удалить боковой чат",
   "discoverPageWebMCPTools": "Найти инструменты WebMCP на странице",
   "forkThreadFromThisTurn": "Создать форк чата с этого хода",
+  "modelSwitched": "Модель переключена: {{fromModel}} -> {{toModel}}",
   "monitorFinished": "Монитор{{value0}} завершён",
   "openInPicker_noEditorsFound": "Установленные редакторы не найдены",
   "openSubagents": "Открытые субагенты: {{value0}}",

@@ -238,6 +238,7 @@ import {
   ProviderListPluginsInput,
   ProviderListModelsInput,
   ProviderListAgentsInput,
+  ProviderListEndpointModelsInput,
   ProviderReadPluginInput,
   ProviderListSkillsInput,
   ProviderSkillsCatalogInput,
@@ -438,6 +439,7 @@ export const WS_METHODS = {
   providerReadPlugin: "provider.readPlugin",
   providerListModels: "provider.listModels",
   providerListAgents: "provider.listAgents",
+  providerListEndpointModels: "provider.listEndpointModels",
 
   // Account (Iishko account session brokered by the server)
   accountStatus: "account.status",
@@ -789,6 +791,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.providerReadPlugin, ProviderReadPluginInput),
   tagRequestBody(WS_METHODS.providerListModels, ProviderListModelsInput),
   tagRequestBody(WS_METHODS.providerListAgents, ProviderListAgentsInput),
+  tagRequestBody(WS_METHODS.providerListEndpointModels, ProviderListEndpointModelsInput),
 
   // Account
   tagRequestBody(WS_METHODS.accountStatus, Schema.Struct({})),

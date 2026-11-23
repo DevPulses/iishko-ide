@@ -24,7 +24,6 @@ function catalogFixture(): Catalogs {
     "zh-CN": {
       common: {
         open: "使用 Codex 打开{{name}}",
-        files_one: "{{count}} 个文件",
         files_other: "{{count}} 个文件",
       },
     },
@@ -32,6 +31,7 @@ function catalogFixture(): Catalogs {
       common: {
         open: "Abrir {{name}} con Codex",
         files_one: "{{count}} archivo",
+        files_many: "{{count}} archivos",
         files_other: "{{count}} archivos",
       },
     },
@@ -81,7 +81,7 @@ describe("localization catalog validation", () => {
     delete catalogs.es!.common!.files_one;
     catalogs.es!.extra = { message: "Hola" };
     catalogs["zh-CN"]!.common!.extra = "多余";
-    catalogs["zh-CN"]!.common!.files_one = " ";
+    catalogs["zh-CN"]!.common!.files_other = " ";
     catalogs["zh-CN"]!.common!.open = "用其他工具打开{{name}}";
     catalogs.en!.settings = { title: "Settings" };
     const errors = validateCatalogs(catalogs, ["en", "zh-CN", "es"]);
@@ -90,8 +90,8 @@ describe("localization catalog validation", () => {
       { code: "extra-namespace", file: "es/extra.json", key: undefined },
       { code: "missing-namespace", file: "es/settings.json", key: undefined },
       { code: "extra-key", file: "zh-CN/common.json", key: "extra" },
-      { code: "empty-value", file: "zh-CN/common.json", key: "files_one" },
-      { code: "interpolation", file: "zh-CN/common.json", key: "files_one" },
+      { code: "empty-value", file: "zh-CN/common.json", key: "files_other" },
+      { code: "interpolation", file: "zh-CN/common.json", key: "files_other" },
       { code: "protected-token", file: "zh-CN/common.json", key: "open" },
       { code: "missing-namespace", file: "zh-CN/settings.json", key: undefined },
     ]);

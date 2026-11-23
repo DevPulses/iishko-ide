@@ -43,6 +43,7 @@ import {
   checkGrokProviderStatus,
   checkOpenCodeProviderStatus,
   checkOmpProviderStatus,
+  checkPiCustomProviderStatus,
   checkPiProviderStatus,
   makeCheckClaudeProviderStatus,
   makeCheckCodexProviderStatus,
@@ -3050,6 +3051,39 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
           }),
         ),
       );
+    });
+  });
+
+  describe("checkPiCustomProviderStatus", () => {
+    const spec = {
+      id: "custom-pi_local_stub",
+      name: "Local Stub",
+      baseUrl: "http://127.0.0.1:8399/v1",
+      models: [{ id: "stub-chat-1" }],
+      apiKeyEnv: "IISHKO_CUSTOM_API_KEY",
+    };
+
+    it("reports authenticated when the instance key resolves", () => {
+      const status = checkPiCustomProviderStatus([spec], {
+        IISHKO_CUSTOM_API_KEY: "sk-test",
+      });
+      assert.strictEqual(status.status, "ready");
+      assert.strictEqual(status.available, true);
+      assert.strictEqual(status.authStatus, "authenticated");
+      assert.strictEqual(status.driver, "pi");
+    });
+
+    it("reports unknown instead of demanding sign-in when the key is absent", () => {
+      const status = checkPiCustomProviderStatus([spec], {});
+      assert.strictEqual(status.status, "ready");
+      assert.strictEqual(status.available, true);
+      assert.strictEqual(status.authStatus, "unknown");
+    });
+
+    it("treats a keyless endpoint as authenticated", () => {
+      const { apiKeyEnv: _apiKeyEnv, ...keyless } = spec;
+      const status = checkPiCustomProviderStatus([keyless], {});
+      assert.strictEqual(status.authStatus, "authenticated");
     });
   });
 

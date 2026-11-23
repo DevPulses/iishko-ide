@@ -155,9 +155,9 @@ it("exchanges a pasted key for a device session and never stores the raw key", a
   expect(JSON.stringify(status)).not.toContain("sk-live-9999");
   expect(storedKey(settings())).toBeUndefined();
   expect(storedEnv(settings(), "REFORMBOSS_DIRECT_API_KEY")).toBeUndefined();
-  const device = JSON.parse(
-    readFileSync(path.join(stateDir, "iishko", "device.json"), "utf8"),
-  ) as { deviceToken?: string };
+  const device = JSON.parse(readFileSync(path.join(stateDir, "iishko", "device.json"), "utf8")) as {
+    deviceToken?: string;
+  };
   expect(device.deviceToken).toBe("idd_keylogin_test");
   const accountJson = readFileSync(path.join(stateDir, "iishko", "account.json"), "utf8");
   expect(accountJson).not.toContain("sk-live-9999");
@@ -167,6 +167,25 @@ it("exchanges a pasted key for a device session and never stores the raw key", a
   const lastHeaders = new Headers(request.mock.calls.at(-1)![0].headers);
   expect(lastHeaders.get("authorization")).toBe("Bearer ids_test_session");
   expect(await account.status()).toMatchObject({ state: "connected", source: "manual" });
+});
+
+it("keeps a user-selected model that is temporarily missing from the gateway list", async () => {
+  const initial: ServerSettings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    newThreadDefaults: {
+      ...DEFAULT_SERVER_SETTINGS.newThreadDefaults,
+      modelSelectionByProvider: {
+        ...DEFAULT_SERVER_SETTINGS.newThreadDefaults.modelSelectionByProvider,
+        pi: { provider: "pi", instanceId: "pi", model: "iishko/kimi-k3" },
+      },
+    },
+  };
+  const { account, settings } = harness(keyLoginRoute(), initial);
+  await account.connectApiKey({ apiKey: "sk-live-9999" });
+  // kimi-k3 is absent from MODELS; the selection must survive the credential write.
+  expect(settings().newThreadDefaults.modelSelectionByProvider.pi).toMatchObject({
+    model: "iishko/kimi-k3",
+  });
 });
 
 it("rejects an unknown key with the invalid-key error and stores nothing", async () => {
@@ -182,9 +201,7 @@ it("rejects an unknown key with the invalid-key error and stores nothing", async
 
 it("maps key-login rate limits and outages to the network error", async () => {
   const limited = harness((input) =>
-    input.url === KEY_LOGIN_URL
-      ? json(429, { retry_after: 17 })
-      : json(404, {}),
+    input.url === KEY_LOGIN_URL ? json(429, { retry_after: 17 }) : json(404, {}),
   );
   await expect(limited.account.connectApiKey({ apiKey: "sk-x" })).rejects.toMatchObject({
     code: IISHKO_ACCOUNT_ERROR_CODES.network,
@@ -205,9 +222,9 @@ it("migrates a stored raw key to a device session on status refresh", async () =
   expect(status).toMatchObject({ state: "connected", source: "manual" });
   expect(storedKey(settings())).toBeUndefined();
   expect(storedEnv(settings(), "REFORMBOSS_DIRECT_API_KEY")).toBeUndefined();
-  const device = JSON.parse(
-    readFileSync(path.join(stateDir, "iishko", "device.json"), "utf8"),
-  ) as { deviceToken?: string };
+  const device = JSON.parse(readFileSync(path.join(stateDir, "iishko", "device.json"), "utf8")) as {
+    deviceToken?: string;
+  };
   expect(device.deviceToken).toBe("idd_keylogin_test");
 });
 

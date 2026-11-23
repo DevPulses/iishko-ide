@@ -13,6 +13,7 @@ import {
   assertExactLoopbackIpAddress,
   assertJsonWithinLimits,
   assertOutboundUrlAllowed,
+  assertPrivateLanEndpointAddress,
   assertPublicIpAddress,
   isBenchmarkIpAddress,
   normalizeOutboundOrigin,
@@ -55,6 +56,12 @@ export interface OutboundHttpPolicy {
   readonly requirePublicAddress?: boolean;
   /** Permits loopback HTTP; "ipv4-subnet" additionally permits all of 127.0.0.0/8. */
   readonly allowLoopbackHttp?: boolean | "ipv4-subnet";
+  /**
+   * User-configured endpoints (custom model servers): plain HTTP may reach
+   * loopback and private LAN ranges (10/8, 172.16/12, 192.168/16, ::1, fc00::/7);
+   * HTTPS may additionally reach public addresses. Link-local stays blocked.
+   */
+  readonly allowPrivateLanAddresses?: boolean;
   /**
    * Permits the RFC 2544 benchmarking range 198.18.0.0/15, which fake-ip DNS
    * modes (Clash/Mihomo, Surge) hand out for the hosts they proxy.
@@ -289,6 +296,7 @@ async function resolvePinnedAddresses(
   requirePublicAddress: boolean,
   allowLoopbackHttp: boolean | "ipv4-subnet",
   allowBenchmarkAddressRange: boolean,
+  allowPrivateLanAddresses: boolean,
   signal: AbortSignal,
 ): Promise<ReadonlyArray<PinnedAddress>> {
   if (signal.aborted) throw abortedError(signal.reason);
@@ -298,9 +306,11 @@ async function resolvePinnedAddresses(
       : url.hostname;
   const requireLoopbackAddress = allowLoopbackHttp && url.protocol === "http:";
   const assertAddressAllowed = (address: string) => {
-    if (requireLoopbackAddress)
+    if (allowPrivateLanAddresses) {
+      assertPrivateLanEndpointAddress(address, url.protocol);
+    } else if (requireLoopbackAddress) {
       assertExactLoopbackIpAddress(address, allowLoopbackHttp === "ipv4-subnet");
-    else if (requirePublicAddress) {
+    } else if (requirePublicAddress) {
       if (allowBenchmarkAddressRange && isBenchmarkIpAddress(address)) return;
       assertPublicIpAddress(address);
     }
@@ -378,6 +388,7 @@ async function requestHop(input: {
   readonly requirePublicAddress: boolean;
   readonly allowLoopbackHttp: boolean | "ipv4-subnet";
   readonly allowBenchmarkAddressRange: boolean;
+  readonly allowPrivateLanAddresses: boolean;
   readonly signal: AbortSignal;
   readonly stopReadingAfter?: (chunk: Uint8Array, headers: Headers) => boolean;
 }): Promise<OutboundHttpResponse> {
@@ -386,6 +397,7 @@ async function requestHop(input: {
     input.requirePublicAddress,
     input.allowLoopbackHttp,
     input.allowBenchmarkAddressRange,
+    input.allowPrivateLanAddresses,
     input.signal,
   );
 
@@ -519,7 +531,8 @@ export class OutboundHttpClient {
   async request(input: OutboundHttpRequest): Promise<OutboundHttpResponse> {
     const policy = input.policy;
     const allowLoopbackHttp = policy.allowLoopbackHttp ?? false;
-    const originOptions = { allowLoopbackHttp };
+    const allowPrivateLanAddresses = policy.allowPrivateLanAddresses === true;
+    const originOptions = { allowLoopbackHttp, allowPrivateLanAddresses };
     const allowedOrigins = policy.allowedOrigins.map((origin) =>
       normalizeOutboundOrigin(origin, originOptions),
     );
@@ -571,6 +584,7 @@ export class OutboundHttpClient {
           requirePublicAddress: policy.requirePublicAddress ?? true,
           allowLoopbackHttp,
           allowBenchmarkAddressRange: policy.allowBenchmarkAddressRange === true,
+          allowPrivateLanAddresses,
           signal: controller.signal,
           ...(input.stopReadingAfter ? { stopReadingAfter: input.stopReadingAfter } : {}),
         });

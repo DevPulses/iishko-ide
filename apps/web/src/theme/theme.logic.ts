@@ -517,6 +517,22 @@ export function normalizeThemeState(value: unknown): ThemeState {
   };
 }
 
+// Set when a stored theme (or a theme application pass) fails and the default
+// pack is substituted. The UI consumes the flag once to show a notice; the
+// corrupt value stays user-removable through the existing Settings resets.
+let themeFallbackNoticePending = false;
+
+export function consumeThemeFallbackNotice(): boolean {
+  const pending = themeFallbackNoticePending;
+  themeFallbackNoticePending = false;
+  return pending;
+}
+
+/** Marks the current theme unusable so the next read reports a fallback notice. */
+export function reportThemeFallback(): void {
+  themeFallbackNoticePending = true;
+}
+
 export function parseStoredThemeState(rawValue: string | null | undefined): ThemeState {
   if (!rawValue) {
     return DEFAULT_THEME_STATE;
@@ -528,6 +544,7 @@ export function parseStoredThemeState(rawValue: string | null | undefined): Them
   try {
     return normalizeThemeState(JSON.parse(rawValue));
   } catch {
+    reportThemeFallback();
     return DEFAULT_THEME_STATE;
   }
 }

@@ -632,6 +632,7 @@
   "couldNotDeleteSideChat": "Could not delete side chat",
   "discoverPageWebMCPTools": "Discover page WebMCP tools",
   "forkThreadFromThisTurn": "Fork thread from this turn",
+  "modelSwitched": "Model switched: {{fromModel}} -> {{toModel}}",
   "monitorFinished": "Monitor{{value0}} finished",
   "openInPicker_noEditorsFound": "No installed editors found",
   "openSubagents": "Open subagents: {{value0}}",

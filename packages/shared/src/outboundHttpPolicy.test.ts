@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   assertExactLoopbackIpAddress,
   assertOutboundUrlAllowed,
+  assertPrivateLanEndpointAddress,
   assertPublicIpAddress,
   isBenchmarkIpAddress,
+  isLoopbackOrPrivateLanIpAddress,
   isPublicIpAddress,
   normalizeOutboundOrigin,
   OutboundPolicyError,
@@ -103,5 +105,98 @@ describe("isBenchmarkIpAddress", () => {
     expect(isPublicIpAddress("198.18.0.1")).toBe(false);
     expect(() => assertPublicIpAddress("198.18.0.1")).toThrowError(OutboundPolicyError);
     expect(() => assertPublicIpAddress("198.19.255.255")).toThrowError(/private/u);
+  });
+});
+
+describe("isLoopbackOrPrivateLanIpAddress", () => {
+  it.each([
+    "127.0.0.1",
+    "127.42.0.7",
+    "::1",
+    "10.0.0.1",
+    "10.255.255.255",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.168.1.20",
+    "192.168.255.255",
+    "fd00::1",
+    "fc00::abcd",
+    "::ffff:10.0.0.1",
+    "::ffff:c0a8:0101",
+  ])("accepts loopback/private LAN %s", (address) => {
+    expect(isLoopbackOrPrivateLanIpAddress(address)).toBe(true);
+  });
+
+  it.each([
+    "8.8.8.8",
+    "1.1.1.1",
+    "169.254.1.1",
+    "fe80::1",
+    "100.64.0.1",
+    "172.15.0.1",
+    "172.32.0.1",
+    "192.167.1.1",
+    "192.0.2.1",
+    "198.51.100.1",
+    "203.0.113.1",
+    "224.0.0.1",
+    "::ffff:8.8.8.8",
+    "not-an-address",
+  ])("rejects non-LAN %s", (address) => {
+    expect(isLoopbackOrPrivateLanIpAddress(address)).toBe(false);
+  });
+});
+
+describe("assertPrivateLanEndpointAddress", () => {
+  it("permits HTTP only to loopback and private LAN addresses", () => {
+    expect(() => assertPrivateLanEndpointAddress("192.168.1.20", "http:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("10.1.2.3", "http:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("127.0.0.1", "http:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("fd00::1", "http:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("8.8.8.8", "http:")).toThrowError(
+      OutboundPolicyError,
+    );
+    expect(() => assertPrivateLanEndpointAddress("169.254.1.1", "http:")).toThrowError(
+      OutboundPolicyError,
+    );
+  });
+
+  it("permits HTTPS to public and private LAN addresses", () => {
+    expect(() => assertPrivateLanEndpointAddress("8.8.8.8", "https:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("192.168.1.20", "https:")).not.toThrow();
+    expect(() => assertPrivateLanEndpointAddress("169.254.1.1", "https:")).toThrowError(
+      OutboundPolicyError,
+    );
+    expect(() => assertPrivateLanEndpointAddress("100.64.0.1", "https:")).toThrowError(
+      OutboundPolicyError,
+    );
+  });
+});
+
+describe("allowPrivateLanAddresses URL policy", () => {
+  const options = { allowPrivateLanAddresses: true };
+
+  it.each([
+    "http://192.168.1.20:8080/v1",
+    "http://10.0.0.5:11434",
+    "http://172.16.3.4:8000",
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "http://my-server.local:8080",
+    "http://[fd00::1]:8080",
+    "https://192.168.1.20:8443",
+    "https://api.example.com",
+  ])("allows opted-in endpoint origin %s", (url) => {
+    expect(normalizeOutboundOrigin(url, options)).toBe(new URL(url).origin);
+  });
+
+  it.each([
+    "http://8.8.8.8:80",
+    "http://169.254.1.1:80",
+    "http://192.0.2.1:80",
+    "http://[fe80::1]:80",
+    "http://user:pass@192.168.1.20:8080",
+  ])("rejects opted-in unsafe origin %s", (url) => {
+    expect(() => normalizeOutboundOrigin(url, options)).toThrowError(OutboundPolicyError);
   });
 });

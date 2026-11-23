@@ -1,0 +1,127 @@
+# FILE: release.yml
+# Purpose: Tag-driven release for ИИШКО IDE on the self-hosted Windows runner.
+#   Builds the Windows NSIS installer natively and the Linux AppImage inside
+#   WSL (low-memory recipe in scripts/ci/build-appimage-wsl.sh), hashes
+#   everything, then creates or updates the Gitea release.
+# Layer: CI workflow
+#
+# Upload order matters: the update feed pulls the newest release every few
+# minutes and requires every file a manifest names to already be an asset,
+# so binaries go first and the yml manifests + SHA256SUMS.txt last.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure Bun 1.4.5
+        shell: pwsh
+        run: |
+          $bunVersion = "1.4.5"
+          $toolCache = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { Join-Path $env:LOCALAPPDATA "iishko-ci\tool-cache" }
+          $toolRoot = Join-Path $toolCache "bun\$bunVersion\x64"
+          # The release zip nests its payload under bun-windows-x64/.
+          $bunDir = Join-Path $toolRoot "bun-windows-x64"
+          $bunExe = Join-Path $bunDir "bun.exe"
+          if (-not (Test-Path $bunExe)) {
+            New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+            $zip = Join-Path $env:RUNNER_TEMP "bun-windows-x64.zip"
+            Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v$bunVersion/bun-windows-x64.zip" -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath $toolRoot -Force
+          }
+          # PATH changes do not survive into later steps; GITHUB_PATH does.
+          $env:PATH = "$bunDir;$env:PATH"
+          $bunDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          bun --version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build workspace bundles
+        run: bunx turbo run build --filter=@iishko/desktop --filter=@iishko/cli
+
+      - name: Build Windows NSIS
+        run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64
+
+      - name: Build Linux AppImage in WSL
+        shell: pwsh
+        run: |
+          $win = $PWD.Path
+          $wslRepo = "/mnt/" + $win.Substring(0,1).ToLower() + ($win.Substring(2) -replace '\\','/')
+          $wslOut = "$wslRepo/release"
+          wsl.exe -e bash -lc "bash '$wslRepo/scripts/ci/build-appimage-wsl.sh' '$wslRepo' '$wslOut'"
+
+      - name: Collect artifacts and SHA256SUMS
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD.Path "release"
+          $files = Get-ChildItem $releaseDir -File |
+            Where-Object { $_.Name -match '\.(exe|AppImage|blockmap|yml|yaml)$' }
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($f.Name)"
+          }
+          $lines | Set-Content (Join-Path $releaseDir "SHA256SUMS.txt") -Encoding ascii
+          Get-ChildItem $releaseDir -File | Select-Object Name, Length
+
+      - name: Create or update Gitea release
+        shell: pwsh
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $api = "https://git.reformboss.com/api/v1"
+          $repo = "reform/iishko-ide"
+          $tag = $env:GITHUB_REF_NAME
+          if (-not $tag) { $tag = git describe --tags --exact-match HEAD }
+          $headers = @{ Authorization = "token $env:GITEA_TOKEN" }
+
+          # Binaries first, manifests last: the feed requires every file a
+          # manifest names to already be an asset of the release.
+          $ordered = @(
+            "IISHKO-IDE-*-x64.exe",
+            "IISHKO-IDE-*-x86_64.AppImage",
+            "*.blockmap",
+            "SHA256SUMS.txt",
+            "iishko.yml",
+            "iishko-linux.yml"
+          )
+          $releaseDir = Join-Path $PWD.Path "release"
+          $all = Get-ChildItem $releaseDir -File
+          $upload = @()
+          foreach ($pattern in $ordered) {
+            $upload += $all | Where-Object { $_.Name -like $pattern }
+          }
+          # Anything unmatched still ships, after the ordered set.
+          $upload += $all | Where-Object { $upload -notcontains $_ }
+
+          # Find or create the release for this tag.
+          $rel = Invoke-RestMethod -Uri "$api/repos/$repo/releases/tags/$tag" -Headers $headers -ErrorAction SilentlyContinue
+          if (-not $rel) {
+            $body = @{ tag_name = $tag; name = $tag; draft = $false; prerelease = $false } | ConvertTo-Json
+            $rel = Invoke-RestMethod -Method Post -Uri "$api/repos/$repo/releases" -Headers $headers -ContentType "application/json" -Body $body
+          }
+
+          foreach ($f in $upload) {
+            $assetName = [uri]::EscapeDataString($f.Name)
+            # Replace an existing asset with the same name, then upload.
+            $existing = Invoke-RestMethod -Uri "$api/repos/$repo/releases/$($rel.id)/assets" -Headers $headers -ErrorAction SilentlyContinue
+            foreach ($a in @($existing)) {
+              if ($a.name -eq $f.Name) {
+                Invoke-RestMethod -Method Delete -Uri "$api/repos/$repo/releases/assets/$($a.id)" -Headers $headers
+              }
+            }
+            Invoke-RestMethod -Method Post -Uri "$api/repos/$repo/releases/$($rel.id)/assets?name=$assetName" -Headers $headers -InFile $f.FullName -ContentType "application/octet-stream"
+            Write-Host "uploaded $($f.Name) ($($f.Length) bytes)"
+          }
+          Write-Host "release $($rel.html_url) ready"

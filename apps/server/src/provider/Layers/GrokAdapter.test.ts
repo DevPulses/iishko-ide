@@ -115,7 +115,7 @@ describe("Grok native plan approval", () => {
         text: "Design the change",
         interactionMode: "plan",
       }),
-    ).toMatch(/^Iishko requested Grok's native plan mode\./u);
+    ).toMatch(/^IISHKO requested Grok's native plan mode\./u);
   });
 
   it("sets Grok's native prompt mode idempotently on every turn", () => {
