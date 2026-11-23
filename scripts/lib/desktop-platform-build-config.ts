@@ -127,6 +127,7 @@ export function createDesktopPlatformBuildConfig(
   const connectorResources = { from: "apps/desktop/resources/cloudflared", to: "cloudflared" };
   const licenseResource = { from: "LICENSE", to: "LICENSE" };
   const nativePackaging = {
+    npmRebuild: false,
     asarUnpack: [...NODE_PTY_ASAR_UNPACK_GLOBS],
     files,
     extraResources: [connectorResources, licenseResource],
