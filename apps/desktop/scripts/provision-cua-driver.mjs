@@ -51,6 +51,9 @@ const signIdentity = option("--sign-identity") ?? process.env.IISHKO_CUA_SIGN_ID
 /** Stable signing identifier so macOS TCC remembers the driver across rebuilds. */
 const CUA_DRIVER_SIGN_IDENTIFIER = "com.reformboss.iishko.cua.driver";
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// Patches are pinned by their LF content: a Windows checkout with core.autocrlf turns them into CRLF.
+const lfDigest = (bytes) =>
+  digest(Buffer.from(Buffer.from(bytes).toString("latin1").replaceAll("\r\n", "\n"), "latin1"));
 const patchPath = fileURLToPath(
   new URL("../patches/cua-driver/0001-iishko-native.patch", import.meta.url),
 );
@@ -73,9 +76,9 @@ if (option("--archive"))
   throw new Error(
     "The upstream binary lacks Iishko's native patch. Use --source-checkout or --artifact-dir instead.",
   );
-if (digest(patch) !== release.patchSha256) throw new Error("Cua native patch checksum mismatch.");
+if (lfDigest(patch) !== release.patchSha256) throw new Error("Cua native patch checksum mismatch.");
 if (platform === "linux") {
-  if (digest(await readFile(linuxPatchPath)) !== release.linuxBrowserPatchSha256)
+  if (lfDigest(await readFile(linuxPatchPath)) !== release.linuxBrowserPatchSha256)
     throw new Error("Cua Linux browser patch checksum mismatch.");
   assertLinuxCuaBuildHost({
     platform,
