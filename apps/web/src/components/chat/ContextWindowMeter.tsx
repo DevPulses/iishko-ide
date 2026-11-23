@@ -122,6 +122,45 @@ export function ContextWindowMeter(props: {
               {t("chat:tokens")}
             </div>
           ) : null}
+          {usage.inputTokens != null ||
+          usage.outputTokens != null ||
+          usage.cachedInputTokens != null ||
+          usage.reasoningOutputTokens != null ? (
+            <div className="mt-1 space-y-0.5 border-t border-border/40 pt-1 text-ui-xs text-muted-foreground">
+              {usage.inputTokens != null ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span>Входящие (input):</span>
+                  <span className="font-mono text-foreground">
+                    {formatContextWindowTokens(usage.inputTokens)}
+                  </span>
+                </div>
+              ) : null}
+              {usage.cachedInputTokens != null ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span>Кэш (cached):</span>
+                  <span className="font-mono text-foreground">
+                    {formatContextWindowTokens(usage.cachedInputTokens)}
+                  </span>
+                </div>
+              ) : null}
+              {usage.outputTokens != null ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span>Ответ (output):</span>
+                  <span className="font-mono text-foreground">
+                    {formatContextWindowTokens(usage.outputTokens)}
+                  </span>
+                </div>
+              ) : null}
+              {usage.reasoningOutputTokens != null ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span>Рассуждения (reasoning):</span>
+                  <span className="font-mono text-foreground">
+                    {formatContextWindowTokens(usage.reasoningOutputTokens)}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {props.showClaudeCache && activeWindowLabel ? (
             <div className="max-w-72 space-y-1 text-ui leading-snug text-muted-foreground">
               <div>

@@ -604,6 +604,8 @@ function ChatRouteGlobalShortcuts() {
   );
 }
 
+import { ChubbyClaudeMascot } from "../components/ChubbyClaudeMascot";
+
 function ChatRouteLayout() {
   const workspaceSidebarControls = useWorkspaceSidebarControls();
   const isEditorView = useLocation({
@@ -711,6 +713,7 @@ function ChatRouteLayout() {
           {mainContentShell}
         </SidebarLeadingControlsDock>
       </AppRailSlotProvider>
+      <ChubbyClaudeMascot />
     </ChatShell>
   );
 }

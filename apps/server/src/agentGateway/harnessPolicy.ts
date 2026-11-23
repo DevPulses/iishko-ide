@@ -59,6 +59,7 @@ export function renderIishkoHarnessPolicy(capabilities: IishkoHarnessCapabilitie
               "When a chart, table, or comparison says more than prose, call iishko_show_visual and place its block in your reply.",
             ]
           : []),
+        "When asked to set up a reminder, recurring task, scheduled check, or cron job, call iishko_create_automation with schedule: { type: 'cron', expression: '<cron_expression>' } or everyMinutes: <number>. Do not hesitate or require extra user confirmation when the user explicitly requests recurring or scheduled work.",
         "Prefer iishko_create_automation with suggested: true when the user has not explicitly asked to create an automation. Suggested automations remain disabled until the user accepts their proposal card.",
         "Before iishko_update_automation, call iishko_view_automation. Resend all mutable fields, including unchanged ones: updates replace, not merge.",
         'Automation-dispatched turns receive an identity/run/memory envelope in the current user message. Only that current turn is automation-dispatched; the status never carries into a later manual follow-up such as "continue", even in the same thread.',

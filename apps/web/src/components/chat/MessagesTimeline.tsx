@@ -1879,11 +1879,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     const summary = chunk.summary;
                     if (!summary) return chunk.entries.map(renderEntryRow);
                     const summaryKey = `${groupId}:${chunk.id}`;
+                    const isSummaryOpen =
+                      toolGroupSummaryOverrides[summaryKey] ??
+                      (activeTurnInProgress || !collapseFinishedTurns);
                     return (
                       <ToolCallGroupSummaryRow
                         key={`tool-summary:${summaryKey}`}
                         summary={summary}
-                        open={toolGroupSummaryOverrides[summaryKey] ?? false}
+                        open={isSummaryOpen}
                         onToggle={(open) => setToolGroupSummaryOpen(summaryKey, open)}
                         fontSizePx={normalizedChatFontSizePx}
                         renderChildren={() => (
@@ -2550,11 +2553,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         }
                         // Message ids stay stable while a live group's first-entry id can drift.
                         const summaryRowKey = `${placement}:${row.message.id}:${chunk.id}`;
+                        const isInlineSummaryOpen =
+                          toolGroupSummaryOverrides[summaryRowKey] ??
+                          (activeTurnInProgress || !collapseFinishedTurns);
                         return (
                           <ToolCallGroupSummaryRow
                             key={`inline-tool-summary:${summaryRowKey}`}
                             summary={summary}
-                            open={toolGroupSummaryOverrides[summaryRowKey] ?? false}
+                            open={isInlineSummaryOpen}
                             onToggle={(open) => setToolGroupSummaryOpen(summaryRowKey, open)}
                             fontSizePx={normalizedChatFontSizePx}
                             renderChildren={() => (
