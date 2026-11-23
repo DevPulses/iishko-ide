@@ -34,6 +34,7 @@ import {
 import { stageCloudflared } from "./lib/cloudflared.ts";
 import { stageDesktopRuntimeResources } from "./lib/desktop-runtime-resources.ts";
 import {
+  desktopUpdateChannel,
   IISHKO_PACKAGED_DESKTOP_FLAVORS,
   type IishkoPackagedDesktopFlavor,
 } from "@iishko/shared/desktopIdentity";
@@ -984,8 +985,18 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
     ];
   } else {
-    // No configured feed: embed none, so electron-builder cannot infer one.
-    buildConfig.publish = null;
+    // Production builds self-update from the IISHKO gateway; the operator can
+    // point at a staging feed with IISHKO_DESKTOP_UPDATE_URL.
+    buildConfig.publish = [
+      {
+        provider: "generic",
+        url:
+          process.env.IISHKO_DESKTOP_UPDATE_URL?.trim() ||
+          "https://api.reformboss.com/webapp/api/ide/update",
+        channel: desktopUpdateChannel(flavor),
+        useMultipleRangeRequest: false,
+      },
+    ];
   }
 
   const windowsSigningConfig =

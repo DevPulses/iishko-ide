@@ -43,3 +43,14 @@ export function buildGitHubReleasesPageUrl(source: GitHubUpdateSource, tag?: str
       : `/${source.owner}/${source.repo}/releases/latest`;
   return new URL(path, `${source.protocol}://${source.host}`).toString();
 }
+
+const IISHKO_UPDATE_RELEASES_URL = "https://git.reformboss.com/reform/iishko-ide/releases";
+
+/** Releases page for the IISHKO generic feed; null for any other feed. */
+export function resolveIishkoReleasesUrl(rawConfig: Record<string, string> | null): string | null {
+  if (rawConfig?.provider !== "generic") {
+    return null;
+  }
+  const feedUrl = rawConfig.url?.trim() ?? "";
+  return feedUrl.startsWith("https://api.reformboss.com/") ? IISHKO_UPDATE_RELEASES_URL : null;
+}

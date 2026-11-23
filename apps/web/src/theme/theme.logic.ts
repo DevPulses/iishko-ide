@@ -342,7 +342,7 @@ export const DEFAULT_THEME_STATE: ThemeState = {
     light: "iishko",
   },
   systemUiFont: true,
-  mode: "light",
+  mode: "dark",
   translucency: DEFAULT_WINDOW_TRANSLUCENCY_BY_VARIANT,
 };
 

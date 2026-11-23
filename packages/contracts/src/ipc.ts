@@ -46,6 +46,10 @@ import type {
   IishkoPairingIdInput,
   IishkoTelegramPairingPoll,
   IishkoTelegramPairingStart,
+  IishkoSubagentsList,
+  IishkoSubagentCreateInput,
+  IishkoSubagentCreateResult,
+  IishkoSubagentsListInput,
 } from "./iishkoAccount";
 import type { TelegramBridgeActionInput, TelegramBridgeStatus } from "./telegramBridge";
 import type { AccountUsageSummaryInput, UsageSummary } from "./accountUsage";
@@ -1648,6 +1652,8 @@ export interface NativeApi {
     connectApiKey: (input: IishkoConnectApiKeyInput) => Promise<IishkoAccountStatus>;
     signOut: () => Promise<void>;
     profile: () => Promise<IishkoProfile>;
+    subagentsList: (input?: IishkoSubagentsListInput) => Promise<IishkoSubagentsList>;
+    subagentsCreate: (input: IishkoSubagentCreateInput) => Promise<IishkoSubagentCreateResult>;
   };
   telegramBridge: {
     status: () => Promise<TelegramBridgeStatus>;

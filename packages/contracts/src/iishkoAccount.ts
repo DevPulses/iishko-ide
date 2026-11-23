@@ -66,7 +66,20 @@ export type IishkoConnectApiKeyInput = typeof IishkoConnectApiKeyInput.Type;
 const OptionalNumber = Schema.optional(Schema.Number);
 const OptionalString = Schema.optional(Schema.String);
 
-const IishkoProfileModel = Schema.Struct({ id: Schema.String, title: OptionalString });
+/** Probe fields every model entry may carry; unknown server values must not fail decoding. */
+const IishkoModelProbeFields = {
+  status: OptionalString,
+  unstable: Schema.optional(Schema.Boolean),
+  latencyMs: OptionalNumber,
+  checkedAt: OptionalNumber,
+  reason: OptionalString,
+};
+
+const IishkoProfileModel = Schema.Struct({
+  id: Schema.String,
+  title: OptionalString,
+  ...IishkoModelProbeFields,
+});
 const IishkoRankRef = Schema.Struct({ tier: Schema.String, title: Schema.String });
 
 /** Everything except `user`, `rank` and `models` is optional: render what is present. */
@@ -75,6 +88,8 @@ export const IishkoProfile = Schema.Struct({
     username: OptionalString,
     firstName: OptionalString,
     photoUrl: OptionalString,
+    joinedAt: OptionalNumber,
+    daysInProject: OptionalNumber,
   }),
   rank: Schema.Struct({
     tier: Schema.String,
@@ -99,10 +114,36 @@ export const IishkoProfile = Schema.Struct({
     }),
   ),
   balance: Schema.optional(Schema.Struct({ usd: OptionalNumber, weeklyCreditUsd: OptionalNumber })),
+  spend: Schema.optional(
+    Schema.Struct({
+      todayUsd: OptionalNumber,
+      todayRequests: OptionalNumber,
+      weekUsd: OptionalNumber,
+      weekRequests: OptionalNumber,
+      monthUsd: OptionalNumber,
+      monthRequests: OptionalNumber,
+      totalUsd: OptionalNumber,
+      topModels: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            id: Schema.String,
+            title: OptionalString,
+            requests: Schema.Number,
+            usd: OptionalNumber,
+          }),
+        ),
+      ),
+    }),
+  ),
   models: Schema.Struct({
     available: Schema.Array(IishkoProfileModel),
     locked: Schema.Array(
-      Schema.Struct({ id: Schema.String, title: OptionalString, minTier: Schema.String }),
+      Schema.Struct({
+        id: Schema.String,
+        title: OptionalString,
+        minTier: Schema.String,
+        ...IishkoModelProbeFields,
+      }),
     ),
   }),
   ideOnly: Schema.optional(
@@ -119,3 +160,37 @@ export const IISHKO_ACCOUNT_ERROR_CODES = {
   network: "iishko_network",
   revoked: "iishko_revoked",
 } as const;
+
+export const IishkoSubagentInfo = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.String,
+  source: Schema.Literals(["builtin", "user", "project"]),
+  path: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+});
+export type IishkoSubagentInfo = typeof IishkoSubagentInfo.Type;
+
+export const IishkoSubagentsListInput = Schema.Struct({
+  cwd: Schema.optional(TrimmedNonEmptyString),
+});
+export type IishkoSubagentsListInput = typeof IishkoSubagentsListInput.Type;
+
+export const IishkoSubagentsList = Schema.Struct({
+  agents: Schema.Array(IishkoSubagentInfo),
+  directories: Schema.Struct({
+    home: Schema.String,
+    project: Schema.optional(Schema.String),
+  }),
+});
+export type IishkoSubagentsList = typeof IishkoSubagentsList.Type;
+
+export const IishkoSubagentCreateInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type IishkoSubagentCreateInput = typeof IishkoSubagentCreateInput.Type;
+
+export const IishkoSubagentCreateResult = Schema.Struct({
+  path: Schema.String,
+});
+export type IishkoSubagentCreateResult = typeof IishkoSubagentCreateResult.Type;

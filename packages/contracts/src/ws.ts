@@ -4,7 +4,12 @@ import {
   SavedInboxRecapIdInput,
 } from "./inboxRecaps";
 import { RemoteAgentCall } from "./remoteAgentGateway";
-import { IishkoConnectApiKeyInput, IishkoPairingIdInput } from "./iishkoAccount";
+import {
+  IishkoConnectApiKeyInput,
+  IishkoPairingIdInput,
+  IishkoSubagentCreateInput,
+  IishkoSubagentsListInput,
+} from "./iishkoAccount";
 import { TelegramBridgeActionInput } from "./telegramBridge";
 import { RemoteAccessInput } from "./remotePairing";
 import { Schema, Struct } from "effect";
@@ -463,6 +468,8 @@ export const WS_METHODS = {
   iishkoConnectApiKey: "iishko.connectApiKey",
   iishkoSignOut: "iishko.signOut",
   iishkoProfile: "iishko.profile",
+  iishkoSubagentsList: "iishko.subagentsList",
+  iishkoSubagentsCreate: "iishko.subagentsCreate",
   telegramBridgeStatus: "telegramBridge.status",
   telegramBridgeAction: "telegramBridge.action",
 
@@ -810,6 +817,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.iishkoConnectApiKey, IishkoConnectApiKeyInput),
   tagRequestBody(WS_METHODS.iishkoSignOut, Schema.Struct({})),
   tagRequestBody(WS_METHODS.iishkoProfile, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.iishkoSubagentsList, IishkoSubagentsListInput),
+  tagRequestBody(WS_METHODS.iishkoSubagentsCreate, IishkoSubagentCreateInput),
   tagRequestBody(WS_METHODS.telegramBridgeStatus, Schema.Struct({})),
   tagRequestBody(WS_METHODS.telegramBridgeAction, TelegramBridgeActionInput),
 

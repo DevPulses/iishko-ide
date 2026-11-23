@@ -6,7 +6,12 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { Model } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  AssistantMessageEventStream,
+  Model,
+  ProviderStreams,
+} from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { decodeOutboundJson, outboundHttp } from "@iishko/shared/outboundHttp";
 
@@ -23,6 +28,8 @@ export const IISHKO_PROVIDER_NAME = "ИИШКО";
 // child environments strip.
 export const IISHKO_API_KEY_ENV = "REFORMBOSS_API_KEY";
 export const IISHKO_API_BASE_URL_ENV = "REFORMBOSS_API_BASE_URL";
+/** Marks a stored raw key as allowed on the direct gateway (only set by the 404 key-login fallback). */
+export const IISHKO_DIRECT_KEY_ENV = "REFORMBOSS_DIRECT_API_KEY";
 export const IISHKO_DEFAULT_BASE_URL = "https://api.reformboss.com/v1";
 export const IISHKO_CLIENT_HEADER = "X-IISHKO-Client";
 export const IISHKO_IDE_HEADER = "X-IISHKO-IDE";
@@ -47,6 +54,25 @@ export const IISHKO_PREFERRED_MODEL_IDS: ReadonlyArray<string> = [
   "qwen3.8-max",
   IISHKO_DEFAULT_MODEL_ID,
 ];
+
+/** Models a new sign-in or a vanished selection falls back to, in order. */
+export const IISHKO_DEFAULT_PICK_ORDER: ReadonlyArray<string> = [
+  "deepseek-v4-flash",
+  "deepseek-v4.1-flash",
+  "glm-5.3",
+  "qwen3.8-flash",
+  "kimi-k3",
+  "gpt-6-luna",
+];
+
+export function pickIishkoDefaultModelId(modelIds: ReadonlyArray<string>): string | undefined {
+  return IISHKO_DEFAULT_PICK_ORDER.find((id) => modelIds.includes(id)) ?? modelIds[0];
+}
+
+/** Context the gateway proxy reports for full-window models; smaller real windows come from `context_length`. */
+export const IISHKO_DEFAULT_CONTEXT_WINDOW = 400_000;
+/** Below this the agent's system prompt and tools cannot fit; the guard would 413 anyway. */
+export const IISHKO_MIN_CONTEXT_WINDOW = 32_000;
 
 // Media, speech and retrieval models cannot drive a tool-calling coding agent.
 // The gateway's `auto` router ignores tool definitions.
@@ -118,6 +144,20 @@ async function writePersistedModels(
 }
 
 /** Gateway failures in Russian for the provider-error path; null keeps the raw message. */
+/** The `message` of a JSON error body (`{"error":{"message"}}` or `{"message"}`), if any. */
+function gatewayJsonMessage(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  try {
+    const body = record(JSON.parse(text.slice(start)));
+    const error = record(body?.error);
+    const message = typeof error?.message === "string" ? error.message : body?.message;
+    return typeof message === "string" && message.trim() ? message.trim().slice(0, 500) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function mapIishkoGatewayError(message: string): string | null {
   const text = message.trim();
   if (!text) return null;
@@ -131,11 +171,11 @@ export function mapIishkoGatewayError(message: string): string | null {
     return `Запрос не помещается в контекст модели${limit}. Начните новый чат или выберите модель с большим контекстом.`;
   }
   if (has("ide_no_key")) return "Завершите регистрацию в боте @iishkogatewaybot (/start)";
-  if (has("ide_account_blocked")) return null;
+  if (has("ide_account_blocked")) return gatewayJsonMessage(text);
   if (has("ide_session_unavailable")) return "Проверка сессии временно недоступна";
   if (has("ide_session_invalid")) return "Ключ ИИШКО недействителен — войдите заново";
   if (has("ide_only")) {
-    return "Для рангов Новичок и Актив модели доступны только при входе через Telegram в ИИШКО IDE";
+    return "Для вашего ранга модели ИИШКО работают только после входа через Telegram: Настройки → Аккаунт ИИШКО → «Войти через Telegram».";
   }
   if (has("upstream_pool_empty", "gateway_restarting", "model_failing_cooldown")) {
     return "Модель временно недоступна — повторите или выберите другую";
@@ -148,13 +188,65 @@ export function mapIishkoGatewayError(message: string): string | null {
     const seconds = /retry[- ]?after[^0-9]{0,12}(\d{1,4})/iu.exec(text)?.[1];
     return `Слишком много запросов, повтор через ${seconds ?? "несколько"} с`;
   }
-  if (status === "403") return null;
-  return null;
+  return gatewayJsonMessage(text);
 }
 
-/** First preferred model that is available, for when the selected model disappears. */
-export function pickIishkoFallbackModelId(availableIds: ReadonlyArray<string>): string | undefined {
-  return sortIishkoModelIds(availableIds.map((id) => ({ id })))[0]?.id;
+// The gateway's context guard answers 413 with `ctxguard_<tokens>` or a
+// `context_length_exceeded` code. pi-ai's overflow detector knows the generic
+// patterns but not `ctxguard_`, so the provider stream marks those errors with
+// a phrase it does recognize; agent-session then auto-compacts and retries.
+const IISHKO_OVERFLOW_SIGNAL = /ctxguard_\d+|context_length_exceeded/iu;
+const IISHKO_OVERFLOW_STATUS = /^(?:[\w -]+ API error \(413\):|413(?:\s|:|$))/iu;
+const PI_OVERFLOW_MARKER = "context length exceeded";
+
+export function isIishkoContextOverflowError(errorMessage: string | undefined): boolean {
+  const text = errorMessage?.trim() ?? "";
+  if (!text || text.toLowerCase().includes(PI_OVERFLOW_MARKER)) return false;
+  return IISHKO_OVERFLOW_SIGNAL.test(text) || IISHKO_OVERFLOW_STATUS.test(text);
+}
+
+function markIishkoOverflow(message: AssistantMessage): void {
+  if (message.stopReason !== "error" || !isIishkoContextOverflowError(message.errorMessage)) {
+    return;
+  }
+  message.errorMessage = `${message.errorMessage ?? ""}\n${PI_OVERFLOW_MARKER}.`.trim();
+}
+
+/**
+ * Forwards a provider stream while tagging IISHKO context-overflow errors so
+ * pi-coding-agent's `isContextOverflow` triggers auto-compaction. Other events
+ * pass through untouched.
+ */
+export function wrapIishkoProviderStreams(
+  api: ProviderStreams,
+  createStream: () => AssistantMessageEventStream,
+): ProviderStreams {
+  const wrap = (inner: AssistantMessageEventStream): AssistantMessageEventStream => {
+    const outer = createStream();
+    void (async () => {
+      let result: AssistantMessage | undefined;
+      for await (const event of inner) {
+        if (event.type === "error") {
+          markIishkoOverflow(event.error);
+          result = event.error;
+        } else if (event.type === "done") {
+          result = event.message;
+        }
+        outer.push(event);
+      }
+      const settled = await Promise.race([
+        inner.result(),
+        Promise.resolve<AssistantMessage | undefined>(undefined),
+      ]);
+      outer.end(settled ?? result);
+    })();
+    return outer;
+  };
+  return {
+    ...api,
+    stream: (model, context, options) => wrap(api.stream(model, context, options)),
+    streamSimple: (model, context, options) => wrap(api.streamSimple(model, context, options)),
+  };
 }
 
 /** The gateway rejected the key itself, as opposed to being unreachable. */
@@ -239,18 +331,23 @@ export function parseIishkoModels(
     const endpoints = dto?.supported_endpoint_types;
     if (Array.isArray(endpoints) && !endpoints.includes("openai")) continue;
     if (id === "auto" || NON_AGENT_MODEL_PATTERN.test(id)) continue;
+    const contextLength = positiveInteger(dto?.context_length);
+    if (contextLength !== undefined && contextLength < IISHKO_MIN_CONTEXT_WINDOW) continue;
+    const displayName =
+      typeof dto?.name === "string" && dto.name.trim().length > 0 ? dto.name.trim() : id;
     models.set(id, {
       id,
-      name: id,
+      name: displayName,
       provider: IISHKO_PROVIDER_ID,
       api: "openai-completions",
       baseUrl,
       reasoning: false,
       input: /^(?:claude|gpt|gemini)/iu.test(id) ? ["text", "image"] : ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow:
-        positiveInteger(dto?.context_length) ??
-        (/^(?:claude|gemini)/iu.test(id) ? 200_000 : 128_000),
+      contextWindow: Math.min(
+        contextLength ?? IISHKO_DEFAULT_CONTEXT_WINDOW,
+        IISHKO_DEFAULT_CONTEXT_WINDOW,
+      ),
       maxTokens:
         positiveInteger(dto?.max_output_tokens) ??
         positiveInteger(dto?.max_completion_tokens) ??
@@ -424,6 +521,13 @@ export async function refreshPiIishkoModels(
       ...(options.request ? { request: options.request } : {}),
     });
     if (!apiKey) return;
+    // A raw key alone must never reach the direct API: the gateway rejects it for
+    // lower ranks. Only a device session, the dev base-URL override, or the
+    // key-login-404 marker may use the direct gateway.
+    const directKeyAllowed =
+      environment[IISHKO_DIRECT_KEY_ENV] === "1" ||
+      Boolean(environment[IISHKO_API_BASE_URL_ENV]?.trim());
+    if (!deviceToken && !directKeyAllowed) return;
     const baseUrl = resolveIishkoBaseUrl(
       environment,
       deviceToken && apiKey.startsWith("ids_") ? getIishkoSessionBaseUrl(deviceToken) : undefined,
@@ -436,7 +540,10 @@ export async function refreshPiIishkoModels(
       cachePath: iishkoModelsCachePath(),
     });
     if (models.length === 0 || options.signal?.aborted) return;
-    const [{ createProvider, envApiKeyAuth }, { openAICompletionsApi }] = await Promise.all([
+    const [
+      { createProvider, createAssistantMessageEventStream, envApiKeyAuth },
+      { openAICompletionsApi },
+    ] = await Promise.all([
       importPackage<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai"),
       importPackage<typeof import("@earendil-works/pi-ai/api/openai-completions.lazy")>(
         "@earendil-works/pi-ai/api/openai-completions.lazy",
@@ -455,12 +562,18 @@ export async function refreshPiIishkoModels(
               const key = await resolveIishkoApiKey(environment, IISHKO_API_KEY_ENV).catch(
                 () => undefined,
               );
-              return key ? { auth: { apiKey: key }, source: "IISHKO" } : undefined;
+              if (!key) return undefined;
+              const directKeyAllowed =
+                environment[IISHKO_DIRECT_KEY_ENV] === "1" ||
+                Boolean(environment[IISHKO_API_BASE_URL_ENV]?.trim());
+              const isRawKey = key === environment[IISHKO_API_KEY_ENV]?.trim();
+              if (isRawKey && !directKeyAllowed) return undefined;
+              return { auth: { apiKey: key }, source: "IISHKO" };
             },
           },
         },
         models,
-        api: openAICompletionsApi(),
+        api: wrapIishkoProviderStreams(openAICompletionsApi(), createAssistantMessageEventStream),
       }),
     );
     await runtime.refresh({ allowNetwork: false });

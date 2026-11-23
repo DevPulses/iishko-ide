@@ -305,6 +305,7 @@ export function KanbanNewTaskDialog({
     selectedProvider,
     selectedProviderInstanceId,
     voiceProviderInstanceId: voiceProviderTarget?.instanceId ?? "codex",
+    voiceProviderKind: voiceProviderTarget?.provider ?? "codex",
     activeProviderStatus: voiceProviderStatus,
     pendingUserInputCount: 0,
     onTranscriptReady: handleTranscriptReady,

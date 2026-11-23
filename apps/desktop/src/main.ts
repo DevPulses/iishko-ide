@@ -298,7 +298,11 @@ import {
   verifyUpdateArtifactIdentity,
   type UpdateArtifactIdentity,
 } from "./updateArtifactIdentity";
-import { buildGitHubReleasesPageUrl, resolveGitHubUpdateSource } from "./githubUpdateFeed";
+import {
+  buildGitHubReleasesPageUrl,
+  resolveGitHubUpdateSource,
+  resolveIishkoReleasesUrl,
+} from "./githubUpdateFeed";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 import { MacUpdateInstallHandoff } from "./macUpdateInstallHandoff";
 import { BROWSER_SESSION_PARTITION, DesktopBrowserManager } from "./browserManager";
@@ -3490,10 +3494,17 @@ async function checkForUpdates(reason: string): Promise<void> {
   } catch (error: unknown) {
     clearUpdateCheckTimeoutTimer();
     const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(
-      reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
-    );
-    console.error(`[desktop-updater] Failed to check for updates: ${message}`);
+    if (!isExplicitUpdateCheckReason(reason)) {
+      // A missing feed or an unreachable host must not surface as an error on
+      // background checks; explicit checks (menu, renderer) still report it.
+      console.warn(`[desktop-updater] Automatic update check failed (${reason}): ${message}`);
+      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+    } else {
+      setUpdateState(
+        reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
+      );
+      console.error(`[desktop-updater] Failed to check for updates: ${message}`);
+    }
   } finally {
     updateCheckInFlight = false;
     finishCheck();
@@ -3942,7 +3953,9 @@ function configureAutoUpdater(): void {
   configuredUpdaterCacheDirName = resolveElectronUpdaterCacheDirName(appUpdateYml, app.getName());
   const githubUpdateSource = resolveGitHubUpdateSource(appUpdateYml);
   const releaseUrl =
-    githubUpdateSource === null ? null : buildGitHubReleasesPageUrl(githubUpdateSource);
+    githubUpdateSource === null
+      ? resolveIishkoReleasesUrl(appUpdateYml)
+      : buildGitHubReleasesPageUrl(githubUpdateSource);
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
     ...createInitialDesktopUpdateState(
@@ -3976,10 +3989,10 @@ function configureAutoUpdater(): void {
   autoUpdater.allowDowngrade = false;
   // Match electron-updater's native GitHub provider path; the packaged
   // app-update.yml owns the production feed, and generic feeds stay mock-only.
-  // macOS release builds repack and validate the Squirrel update zip, then omit
-  // the stale zip blockmap so ShipIt always installs the exact signed payload.
-  autoUpdater.disableDifferentialDownload =
-    process.platform === "darwin" || isArm64HostRunningIntelBuild(desktopRuntimeInfo);
+  // The IISHKO update feed serves versioned binaries without multi-range
+  // support, so differential downloads are disabled everywhere: every platform
+  // fetches the full installer through the resumable downloader.
+  autoUpdater.disableDifferentialDownload = true;
   // electron-updater has no working idle timeout on macOS (its socket timeout is
   // wired to a `socket` event Electron's net.request never emits) and never
   // resumes from a byte offset, so a stalled CDN transfer hangs for minutes
@@ -5963,7 +5976,10 @@ function registerIpcHandlers(): void {
       },
     });
   }
-  registerDesktopVoiceTranscriptionHandler();
+  registerDesktopVoiceTranscriptionHandler({
+    getBackendHttpUrl: () => backendHttpUrl,
+    getAuthToken: () => backendAuthToken,
+  });
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
   registerBrowserVaultIpc(

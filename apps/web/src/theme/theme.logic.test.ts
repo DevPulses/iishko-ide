@@ -39,7 +39,7 @@ describe("parseStoredThemeState", () => {
     expect(state.codeThemeIds).toEqual({ dark: "iishko", light: "iishko" });
     expect(state.chromeThemes.dark.accent).toBe("#ffd700");
     expect(state.chromeThemes.light.accent).toBe("#191919");
-    expect(state.mode).toBe("light");
+    expect(state.mode).toBe("dark");
   });
 
   it.each(["dark", "light", "system"] as const)(
@@ -117,18 +117,18 @@ describe("parseStoredThemeState", () => {
         dark: "linear",
         light: "codex",
       },
-      mode: "light",
+      mode: "dark",
     });
   });
 
-  it("keeps the light default unless the user chose a mode", () => {
+  it("keeps the dark default unless the user chose a mode", () => {
     for (const raw of [
-      "dark",
-      JSON.stringify({ mode: "dark" }),
-      JSON.stringify({ ...DEFAULT_THEME_STATE, mode: "dark" }),
+      "light",
+      JSON.stringify({ mode: "light" }),
+      JSON.stringify({ ...DEFAULT_THEME_STATE, mode: "light" }),
       JSON.stringify({ ...DEFAULT_THEME_STATE, mode: "system" }),
     ]) {
-      expect(parseStoredThemeState(raw).mode).toBe("light");
+      expect(parseStoredThemeState(raw).mode).toBe("dark");
     }
     for (const mode of ["dark", "system", "light"] as const) {
       const chosen = parseStoredThemeState(

@@ -2014,6 +2014,7 @@ export const checkPiProviderStatus = (
         status: "ready" as const,
         available: true,
         authStatus: connected ? ("authenticated" as const) : ("unauthenticated" as const),
+        ...(connected ? { voiceTranscriptionAvailable: true } : {}),
         ...(installation.success.version ? { version: installation.success.version } : {}),
         checkedAt,
         message: connected ? "Аккаунт ИИШКО подключён." : "Подключите аккаунт ИИШКО.",

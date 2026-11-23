@@ -477,7 +477,8 @@ export const ServerVoiceTranscriptionInput = Schema.Struct({
 export type ServerVoiceTranscriptionInput = typeof ServerVoiceTranscriptionInput.Type;
 
 export const ServerVoiceTranscriptionResult = Schema.Struct({
-  text: TrimmedNonEmptyString,
+  // Empty text is a valid outcome: the clip contained no speech.
+  text: Schema.String,
 });
 export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
 

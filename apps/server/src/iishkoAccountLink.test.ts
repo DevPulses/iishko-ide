@@ -275,6 +275,88 @@ it("renders whatever profile fields exist and keeps a short server cache", async
   expect(profileCalls).toBe(1);
 });
 
+it("maps the full profile fixture to camelCase and drops junk values", async () => {
+  const full = {
+    user: {
+      username: "iishko_user",
+      first_name: "Никита",
+      joined_at: 1_700_000_000,
+      days_in_project: 12,
+    },
+    rank: { tier: 4, title: "Легенда", emoji: "💎" },
+    limits: { requests_today: 13, requests_limit: 30000, daily_usd_cap: 5, daily_usd_used: 1.2 },
+    balance: { usd: 3020, weekly_credit_usd: 10 },
+    spend: {
+      today_usd: 1.2,
+      today_requests: 13,
+      week_usd: 8.5,
+      month_requests: 240,
+      total_usd: 42.75,
+      top_models: [
+        { id: "deepseek-v4-flash", title: "DeepSeek V4 Flash", requests: 90, usd: 12.5 },
+        { id: "", requests: 5 },
+        { id: "junk-no-requests" },
+        { id: "kimi-k3", requests: -3 },
+        "not-an-object",
+      ],
+    },
+    models: {
+      available: [
+        {
+          id: "deepseek-v4-flash",
+          title: "DeepSeek V4 Flash",
+          status: "up",
+          unstable: false,
+          ms: 412,
+          checked_at: 1_700_000_100,
+          reason: "",
+        },
+        { id: "glm-5.3", status: "busy", unstable: true, ms: "junk", checked_at: -4 },
+      ],
+      locked: [{ id: "claude-opus-5-5", min_tier: 5, status: "down", reason: "x".repeat(300) }],
+    },
+  };
+  const { account } = harness(
+    pairingRoute(
+      "dev-full-1",
+      () => approved("dev-full-1"),
+      (input) => (String(input.url) === `${BASE}/profile` ? json(200, full) : undefined),
+    ),
+  );
+  const started = await startPairing(account);
+  await account.pollTelegramPairing({ pairingId: started.pairingId });
+  const profile = await account.profile();
+  expect(profile.user).toMatchObject({ joinedAt: 1_700_000_000, daysInProject: 12 });
+  expect(profile.models.available[0]).toMatchObject({
+    id: "deepseek-v4-flash",
+    status: "up",
+    unstable: false,
+    latencyMs: 412,
+    checkedAt: 1_700_000_100,
+  });
+  expect(profile.models.available[0]?.reason).toBeUndefined();
+  expect(profile.models.available[1]).toMatchObject({ id: "glm-5.3", status: "busy", unstable: true });
+  expect(profile.models.available[1]?.latencyMs).toBeUndefined();
+  expect(profile.models.available[1]?.checkedAt).toBeUndefined();
+  expect(profile.models.locked[0]).toMatchObject({
+    id: "claude-opus-5-5",
+    minTier: "5",
+    status: "down",
+    reason: "x".repeat(160),
+  });
+  expect(profile.spend).toMatchObject({
+    todayUsd: 1.2,
+    todayRequests: 13,
+    weekUsd: 8.5,
+    monthRequests: 240,
+    totalUsd: 42.75,
+  });
+  expect(profile.spend?.weekRequests).toBeUndefined();
+  expect(profile.spend?.topModels).toEqual([
+    { id: "deepseek-v4-flash", title: "DeepSeek V4 Flash", requests: 90, usd: 12.5 },
+  ]);
+});
+
 it("loads models through the IDE proxy for a device session and the public API for a manual key", async () => {
   const { account, request } = harness(pairingRoute("dev-base-1", () => approved("dev-base-1")));
   const started = await startPairing(account);
@@ -310,5 +392,16 @@ it("prefers the https base_url returned by /token over the proxy default", async
   await account.pollTelegramPairing({ pairingId: started.pairingId });
   expect(request.mock.calls.map(([input]) => String(input.url))).toContain(
     "https://gateway.example.test/ide/v1/models",
+  );
+});
+
+it("selects the preferred default model on sign-in, not the first listed one", async () => {
+  const { account, settings } = harness(
+    pairingRoute("dev-default-1", () => approved("dev-default-1")),
+  );
+  const started = await startPairing(account);
+  await account.pollTelegramPairing({ pairingId: started.pairingId });
+  expect(settings().newThreadDefaults.modelSelectionByProvider.pi?.model).toBe(
+    "iishko/deepseek-v4-flash",
   );
 });

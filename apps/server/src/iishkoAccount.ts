@@ -43,8 +43,10 @@ import {
 } from "./iishkoSession.ts";
 import {
   IISHKO_API_KEY_ENV,
+  IISHKO_DIRECT_KEY_ENV,
   clearIishkoModelCache,
   IISHKO_PREFERRED_MODEL_IDS,
+  pickIishkoDefaultModelId,
   IISHKO_PROVIDER_ID,
   IishkoAuthError,
   loadIishkoModels,
@@ -164,17 +166,75 @@ const isoFromSeconds = (value: unknown): string | undefined => {
 };
 const str = (value: unknown, max = 256): string | undefined => text(value, max) ?? undefined;
 const opt = (key: string, value: unknown) => (value === undefined ? {} : { [key]: value });
+/** Counts, money and timestamps are meaningless below zero; junk is dropped, not clamped. */
+const nonNegNum = (value: unknown): number | undefined => {
+  const parsed = num(value);
+  return parsed !== undefined && parsed >= 0 ? parsed : undefined;
+};
 
-function modelRefs(value: unknown): Array<{ id: string; title?: string; minTier?: string }> {
+interface IishkoModelProbe {
+  readonly status?: string;
+  readonly unstable?: boolean;
+  readonly latencyMs?: number;
+  readonly checkedAt?: number;
+  readonly reason?: string;
+}
+
+function modelProbe(item: Record<string, unknown> | undefined): IishkoModelProbe {
+  if (!item) return {};
+  const status = str(item.status, 20);
+  const reason = str(item.reason, 160);
+  const latencyMs = nonNegNum(item.ms);
+  const checkedAt = nonNegNum(item.checked_at);
+  const unstable = typeof item.unstable === "boolean" ? item.unstable : undefined;
+  return {
+    ...(status ? { status } : {}),
+    ...(unstable !== undefined ? { unstable } : {}),
+    ...(latencyMs !== undefined ? { latencyMs } : {}),
+    ...(checkedAt !== undefined ? { checkedAt } : {}),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function modelRefs(
+  value: unknown,
+): Array<{ id: string; title?: string; minTier?: string } & IishkoModelProbe> {
   if (!Array.isArray(value)) return [];
-  const refs: Array<{ id: string; title?: string; minTier?: string }> = [];
+  const refs: Array<{ id: string; title?: string; minTier?: string } & IishkoModelProbe> = [];
   for (const entry of value.slice(0, 500)) {
     const item = record(entry);
     const id = str(item?.id, 200);
     if (!id) continue;
-    const title = str(item?.title, 200);
+    const title = str(item?.title, 80);
     const minTier = tierText(item?.min_tier);
-    refs.push({ id, ...(title ? { title } : {}), ...(minTier ? { minTier } : {}) });
+    refs.push({
+      id,
+      ...(title ? { title } : {}),
+      ...(minTier ? { minTier } : {}),
+      ...modelProbe(item),
+    });
+  }
+  return refs;
+}
+
+function topModelRefs(
+  value: unknown,
+): Array<{ id: string; title?: string; requests: number; usd?: number }> {
+  if (!Array.isArray(value)) return [];
+  const refs: Array<{ id: string; title?: string; requests: number; usd?: number }> = [];
+  for (const entry of value.slice(0, 10)) {
+    const item = record(entry);
+    const id = str(item?.id, 200);
+    const requests = nonNegNum(item?.requests);
+    if (!id || requests === undefined) continue;
+    const title = str(item?.title, 80);
+    const usd = nonNegNum(item?.usd);
+    refs.push({
+      id,
+      requests,
+      ...(title ? { title } : {}),
+      ...(usd !== undefined ? { usd } : {}),
+    });
   }
   return refs;
 }
@@ -204,6 +264,7 @@ export function parseIishkoProfile(
       })
     : [];
   const balance = record(payload.balance);
+  const spend = record(payload.spend);
   const ideOnly = record(payload.ide_only);
   const device = record(payload.device);
   const deviceName = str(device?.name, 128);
@@ -212,6 +273,8 @@ export function parseIishkoProfile(
       ...opt("username", str(user.username, 64)),
       ...opt("firstName", str(user.first_name, 128)),
       ...opt("photoUrl", str(user.photo_url, 512)),
+      ...opt("joinedAt", nonNegNum(user.joined_at)),
+      ...opt("daysInProject", nonNegNum(user.days_in_project)),
     },
     rank: {
       tier,
@@ -241,13 +304,30 @@ export function parseIishkoProfile(
           },
         }
       : {}),
+    ...(spend
+      ? {
+          spend: {
+            ...opt("todayUsd", nonNegNum(spend.today_usd)),
+            ...opt("todayRequests", nonNegNum(spend.today_requests)),
+            ...opt("weekUsd", nonNegNum(spend.week_usd)),
+            ...opt("weekRequests", nonNegNum(spend.week_requests)),
+            ...opt("monthUsd", nonNegNum(spend.month_usd)),
+            ...opt("monthRequests", nonNegNum(spend.month_requests)),
+            ...opt("totalUsd", nonNegNum(spend.total_usd)),
+            ...(spend.top_models !== undefined
+              ? { topModels: topModelRefs(spend.top_models) }
+              : {}),
+          },
+        }
+      : {}),
     models: {
-      available: modelRefs(models.available).map(({ id, title }) => ({
+      available: modelRefs(models.available).map(({ id, title, minTier: _minTier, ...probe }) => ({
         id,
         ...(title ? { title } : {}),
+        ...probe,
       })),
-      locked: modelRefs(models.locked).flatMap(({ id, title, minTier }) =>
-        minTier ? [{ id, minTier, ...(title ? { title } : {}) }] : [],
+      locked: modelRefs(models.locked).flatMap(({ id, title, minTier, ...probe }) =>
+        minTier ? [{ id, minTier, ...(title ? { title } : {}), ...probe }] : [],
       ),
     },
     ...(ideOnly && typeof ideOnly.applies === "boolean"
@@ -317,6 +397,7 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
       const kept = (existing?.environment ?? []).filter(
         (entry) =>
           entry.name !== IISHKO_API_KEY_ENV &&
+          entry.name !== IISHKO_DIRECT_KEY_ENV &&
           entry.name !== IISHKO_DEVICE_TOKEN_ENV &&
           entry.name !== LEGACY_IISHKO_DEVICE_TOKEN_ENV,
       );
@@ -325,11 +406,17 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
         ...(credentials.apiKey
           ? [{ name: IISHKO_API_KEY_ENV, value: credentials.apiKey, sensitive: true }]
           : []),
+        // A stored raw key may reach the gateway directly only on servers without
+        // key-login (the 404 fallback); device sessions never need this marker.
+        ...(credentials.apiKey && !credentials.deviceToken
+          ? [{ name: IISHKO_DIRECT_KEY_ENV, value: "1", sensitive: false }]
+          : []),
       ];
       const { environment: _previous, ...rest } = existing ?? { driver: "pi" as const };
       const selection = current.newThreadDefaults.modelSelectionByProvider[PI_INSTANCE_ID];
       const slugs = modelIds.map((id) => `${IISHKO_PROVIDER_ID}/${id}`);
-      const preferred = slugs[0];
+      const defaultId = pickIishkoDefaultModelId(modelIds);
+      const preferred = defaultId ? `${IISHKO_PROVIDER_ID}/${defaultId}` : undefined;
       const signedIn = Boolean(credentials.apiKey || credentials.deviceToken);
       const selectionPatch: Record<string, unknown> | null | undefined =
         signedIn && preferred && (!selection || !slugs.includes(selection.model))
@@ -385,8 +472,107 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
     await deps.refreshProviders().catch(() => undefined);
   };
 
+  /** Drops a stored raw key (and the direct-API marker) after the server rejects it. */
+  const clearManualKey = () =>
+    deps.updateSettings((current) => {
+      const existing = current.providerInstances[PI_INSTANCE_ID];
+      const environment = (existing?.environment ?? []).filter(
+        (entry) => entry.name !== IISHKO_API_KEY_ENV && entry.name !== IISHKO_DIRECT_KEY_ENV,
+      );
+      const { environment: _previous, ...rest } = existing ?? { driver: "pi" as const };
+      return {
+        providerInstances: {
+          ...current.providerInstances,
+          [PI_INSTANCE_ID]: { ...rest, ...(environment.length > 0 ? { environment } : {}) },
+        },
+      } as ServerSettingsPatch;
+    });
+
+  const manualKeyLogin = { failures: 0, retryAt: 0, inflight: false };
+
+  /**
+   * A raw key stored before key-login existed is exchanged silently for a device
+   * session. Until that succeeds the provider must not route generation to the
+   * direct API, so failures only schedule a bounded retry.
+   */
+  const migrateLegacyManualKey = async (): Promise<void> => {
+    if (manualKeyLogin.inflight || now() < manualKeyLogin.retryAt) return;
+    const settings = await deps.readSettings();
+    const key = readConfiguredKey(settings);
+    if (!key) {
+      manualKeyLogin.failures = 0;
+      manualKeyLogin.retryAt = 0;
+      return;
+    }
+    const deviceToken = await readDeviceToken();
+    if (deviceToken && !isIishkoDeviceRevoked(deviceToken)) return;
+    manualKeyLogin.inflight = true;
+    manualKeyLogin.retryAt = now() + 60_000;
+    const backoff = () => {
+      manualKeyLogin.failures += 1;
+      manualKeyLogin.retryAt = now() + Math.min(60_000 * 2 ** manualKeyLogin.failures, 30 * 60_000);
+    };
+    try {
+      let result;
+      try {
+        result = await accountRequest("key-login", {
+          body: {
+            client: "iishko-ide",
+            api_key: key,
+            device: deviceName(),
+            platform: process.platform,
+            version: deps.appVersion ?? "1.0.0",
+          },
+          service: "iishko-key-login",
+        });
+      } catch {
+        backoff();
+        return;
+      }
+      if (result.status === 200) {
+        const token = text(result.payload?.device_token, 1024);
+        const account = record(result.payload?.account);
+        if (result.payload?.status === "approved" && token) {
+          const migrated = await connect({ deviceToken: token }, "manual", {
+            username: text(account?.username, 64),
+            displayName: text(account?.first_name, 128),
+          }).then(
+            () => true,
+            () => false,
+          );
+          if (migrated) {
+            manualKeyLogin.failures = 0;
+            manualKeyLogin.retryAt = 0;
+          } else {
+            backoff();
+          }
+          return;
+        }
+        backoff();
+        return;
+      }
+      if (result.status === 401) {
+        await clearManualKey();
+        manualKeyLogin.failures = 0;
+        manualKeyLogin.retryAt = 0;
+        return;
+      }
+      if (result.status === 404) {
+        // Older account servers have no key-login route: keep the direct-key path usable.
+        await writeCredentials({ apiKey: key }, []).catch(() => undefined);
+        manualKeyLogin.failures = 0;
+        manualKeyLogin.retryAt = 0;
+        return;
+      }
+      backoff();
+    } finally {
+      manualKeyLogin.inflight = false;
+    }
+  };
+
   const status = async (): Promise<IishkoAccountStatus> => {
     await migrateLegacyDeviceToken();
+    await migrateLegacyManualKey();
     const settings = await deps.readSettings();
     const deviceToken = await readDeviceToken();
     const key = readConfiguredKey(settings);
@@ -401,7 +587,7 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
     }
     return {
       state: "connected",
-      source: deviceToken ? "telegram" : (metadata?.source ?? "manual"),
+      source: metadata?.source ?? (deviceToken ? "telegram" : "manual"),
       account,
       keyHint: metadata?.keyHint ?? iishkoKeyHint(deviceToken ?? key ?? ""),
       connectedAt: metadata?.connectedAt ?? new Date(0).toISOString(),
@@ -445,7 +631,7 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
     } catch (cause) {
       if (cause instanceof IishkoAuthError || cause instanceof IishkoDeviceRevokedError) {
         throw new WsRpcError({
-          message: "The IISHKO gateway did not accept this credential.",
+          message: "Ключ не найден. Проверьте ключ или войдите через Telegram.",
           code: IISHKO_ACCOUNT_ERROR_CODES.invalidKey,
         });
       }
@@ -502,7 +688,8 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
     return {
       status: response.status,
       payload,
-      retryAfter: num(record(safeJson(response))?.retry_after),
+      retryAfter:
+        num(record(safeJson(response))?.retry_after) ?? num(response.headers.get("retry-after")),
     };
   };
 
@@ -634,13 +821,81 @@ export function makeIishkoAccount(deps: IishkoAccountDeps): IishkoAccount {
     },
 
     connectApiKey: async ({ apiKey }) => {
+      const key = apiKey.trim();
       const staleDevice = await readDeviceToken();
-      const status = await connect({ apiKey: apiKey.trim() }, "manual", {
-        username: null,
-        displayName: null,
+      // Replacing a device also revokes it server-side; failures are ignored.
+      const releaseStaleDevice = staleDevice
+        ? () =>
+            accountRequest("signout", {
+              deviceToken: staleDevice,
+              service: "iishko-signout",
+            })
+              .catch(() => undefined)
+              .then(() => forgetIishkoSession(staleDevice))
+        : undefined;
+      // The IDE proxy issues a device session for the key; the raw key is never stored.
+      let result;
+      try {
+        result = await accountRequest("key-login", {
+          body: {
+            client: "iishko-ide",
+            api_key: key,
+            device: deviceName(),
+            platform: process.platform,
+            version: deps.appVersion ?? "1.0.0",
+          },
+          service: "iishko-key-login",
+        });
+      } catch {
+        throw new WsRpcError({
+          message: "Сервер входа недоступен. Повторите позже.",
+          code: IISHKO_ACCOUNT_ERROR_CODES.network,
+        });
+      }
+      if (result.status === 404) {
+        // Older account servers have no key-login route; keep the direct-key flow.
+        const status = await connect({ apiKey: key }, "manual", {
+          username: null,
+          displayName: null,
+        });
+        await releaseStaleDevice?.();
+        return status;
+      }
+      if (result.status === 200) {
+        const deviceToken = text(result.payload?.device_token, 1024);
+        const account = record(result.payload?.account);
+        if (result.payload?.status === "approved" && deviceToken) {
+          const status = await connect({ deviceToken }, "manual", {
+            username: text(account?.username, 64),
+            displayName: text(account?.first_name, 128),
+          });
+          await releaseStaleDevice?.();
+          return status;
+        }
+        throw networkError("The IISHKO sign-in service returned an unexpected answer.");
+      }
+      if (result.status === 401) {
+        throw new WsRpcError({
+          message: "Ключ не найден. Проверьте ключ или войдите через Telegram.",
+          code: IISHKO_ACCOUNT_ERROR_CODES.invalidKey,
+        });
+      }
+      if (result.status === 403) {
+        throw new WsRpcError({
+          message: text(result.payload?.message, 500) ?? "Аккаунт ИИШКО заблокирован.",
+          code: IISHKO_ACCOUNT_ERROR_CODES.invalidKey,
+        });
+      }
+      if (result.status === 429) {
+        throw new WsRpcError({
+          message: `Слишком много попыток, повторите через ${result.retryAfter ?? 60} с`,
+          code: IISHKO_ACCOUNT_ERROR_CODES.network,
+        });
+      }
+      throw new WsRpcError({
+        message: "Сервер входа недоступен. Повторите позже.",
+        code: IISHKO_ACCOUNT_ERROR_CODES.network,
       });
-      if (staleDevice) forgetIishkoSession(staleDevice);
-      return status;
     },
 
     profile: async () => {

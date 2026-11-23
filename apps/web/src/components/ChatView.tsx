@@ -3193,6 +3193,7 @@ export default function ChatView({
     selectedProvider,
     selectedProviderInstanceId,
     voiceProviderInstanceId: voiceProviderTarget?.instanceId ?? "codex",
+    voiceProviderKind: voiceProviderTarget?.provider ?? "codex",
     activeProviderStatus: voiceProviderStatus,
     pendingUserInputCount: pendingUserInputs.length,
     onTranscriptReady: appendVoiceTranscriptToComposer,

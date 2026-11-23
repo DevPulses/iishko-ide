@@ -18,6 +18,10 @@ import {
   IishkoPairingIdInput,
   IishkoTelegramPairingPoll,
   IishkoTelegramPairingStart,
+  IishkoSubagentsList,
+  IishkoSubagentCreateInput,
+  IishkoSubagentCreateResult,
+  IishkoSubagentsListInput,
 } from "./iishkoAccount";
 import { TelegramBridgeActionInput, TelegramBridgeStatus } from "./telegramBridge";
 import { RemoteAccessInput, RemoteAccessResult } from "./remotePairing";
@@ -1968,6 +1972,16 @@ export const WsIishkoProfileRpc = Rpc.make(WS_METHODS.iishkoProfile, {
   success: IishkoProfile,
   error: WsRpcError,
 });
+export const WsIishkoSubagentsListRpc = Rpc.make(WS_METHODS.iishkoSubagentsList, {
+  payload: IishkoSubagentsListInput,
+  success: IishkoSubagentsList,
+  error: WsRpcError,
+});
+export const WsIishkoSubagentsCreateRpc = Rpc.make(WS_METHODS.iishkoSubagentsCreate, {
+  payload: IishkoSubagentCreateInput,
+  success: IishkoSubagentCreateResult,
+  error: WsRpcError,
+});
 export const WsTelegramBridgeStatusRpc = Rpc.make(WS_METHODS.telegramBridgeStatus, {
   payload: Schema.Struct({}),
   success: TelegramBridgeStatus,
@@ -2572,6 +2586,8 @@ export type WsFeatureRpc =
   | typeof WsIishkoConnectApiKeyRpc
   | typeof WsIishkoSignOutRpc
   | typeof WsIishkoProfileRpc
+  | typeof WsIishkoSubagentsListRpc
+  | typeof WsIishkoSubagentsCreateRpc
   | typeof WsTelegramBridgeStatusRpc
   | typeof WsTelegramBridgeActionRpc
   | typeof WsHostsListRpc
@@ -2788,6 +2804,8 @@ const wsApplicationRpcGroup = RpcGroup.make(
   WsIishkoConnectApiKeyRpc,
   WsIishkoSignOutRpc,
   WsIishkoProfileRpc,
+  WsIishkoSubagentsListRpc,
+  WsIishkoSubagentsCreateRpc,
   WsTelegramBridgeStatusRpc,
   WsTelegramBridgeActionRpc,
   WsHostsListRpc,

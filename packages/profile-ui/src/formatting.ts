@@ -6,28 +6,28 @@
 import type { ProviderGlyphKey as ProviderKind } from "./providerIcon";
 
 // Compact token/count formatting matching the reference card ("17bn", "538m", "1.2k").
-export function formatCompact(value: number | null | undefined, locale?: string): string {
+// The decimal separator is fixed to "." so compact badges render identically in
+// every UI locale; `locale` is accepted for call-site compatibility.
+export function formatCompact(value: number | null | undefined, _locale?: string): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "—";
   }
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000) {
-    return `${trimZero(value / 1_000_000_000, locale)}bn`;
+    return `${trimZero(value / 1_000_000_000)}bn`;
   }
   if (abs >= 1_000_000) {
-    return `${trimZero(value / 1_000_000, locale)}m`;
+    return `${trimZero(value / 1_000_000)}m`;
   }
   if (abs >= 1_000) {
-    return `${trimZero(value / 1_000, locale)}k`;
+    return `${trimZero(value / 1_000)}k`;
   }
   return `${Math.round(value)}`;
 }
 
-function trimZero(value: number, locale: string | undefined): string {
+function trimZero(value: number): string {
   const rounded = Math.round(value * 10) / 10;
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1, useGrouping: false }).format(
-    rounded,
-  );
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 // Thousands-separated integer ("4,934").

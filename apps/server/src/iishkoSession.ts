@@ -36,12 +36,18 @@ interface CachedSession {
 
 let deviceTokenPath: string | undefined;
 
+/** The IISHKO data home (`$IISHKO_HOME` or `~/.iishko-ide`); user-level files live under it. */
+export function iishkoHomeDir(): string {
+  return (
+    process.env.IISHKO_HOME?.trim() ||
+    join(process.env.HOME ?? process.env.USERPROFILE ?? ".", ".iishko-ide")
+  );
+}
+
 /** The device token lives only in this server-side file (mode 0600), never in a process env. */
 export function iishkoDeviceTokenPath(): string {
   if (deviceTokenPath) return deviceTokenPath;
-  const home =
-    process.env.IISHKO_HOME?.trim() ||
-    join(process.env.HOME ?? process.env.USERPROFILE ?? ".", ".iishko-ide");
+  const home = iishkoHomeDir();
   return join(home, process.env.VITE_DEV_SERVER_URL ? "dev" : "userdata", "iishko", "device.json");
 }
 
@@ -266,7 +272,7 @@ export function forgetIishkoSession(deviceToken: string): void {
   revoked.delete(key);
 }
 
-/** The API key for the gateway: the device session wins; a manual key only replaces a revoked device. */
+/** The API key for the gateway: the device session wins; a raw key is returned only when no device exists. */
 export async function resolveIishkoApiKey(
   environment: Readonly<NodeJS.ProcessEnv>,
   manualKeyEnv: string,
@@ -275,13 +281,7 @@ export async function resolveIishkoApiKey(
   const deviceToken = options.deviceToken?.trim() || (await readIishkoDeviceToken());
   if (deviceToken) {
     lastDeviceToken = deviceToken;
-    try {
-      return await getIishkoSessionToken(deviceToken, { env: environment, ...options });
-    } catch (cause) {
-      if (!(cause instanceof IishkoDeviceRevokedError) || !environment[manualKeyEnv]?.trim()) {
-        throw cause;
-      }
-    }
+    return getIishkoSessionToken(deviceToken, { env: environment, ...options });
   }
   return environment[manualKeyEnv]?.trim() || undefined;
 }

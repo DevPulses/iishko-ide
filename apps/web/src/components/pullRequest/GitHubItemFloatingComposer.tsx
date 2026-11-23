@@ -98,6 +98,7 @@ export function GitHubItemFloatingComposer({
     selectedProvider: "codex",
     selectedProviderInstanceId: "codex",
     voiceProviderInstanceId: voiceProviderTarget?.instanceId ?? "codex",
+    voiceProviderKind: voiceProviderTarget?.provider ?? "codex",
     activeProviderStatus: voiceProviderTarget?.status ?? null,
     pendingUserInputCount: 0,
     onTranscriptReady: (transcript) =>
