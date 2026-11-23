@@ -103,11 +103,7 @@ export function usesBundledPi(
   config: Readonly<Record<string, unknown>>,
   isDefault: boolean,
 ): boolean {
-  return (
-    provider === "pi" &&
-    isDefault &&
-    readConfigString(config, "binaryPath") === undefined
-  );
+  return provider === "pi" && isDefault && readConfigString(config, "binaryPath") === undefined;
 }
 
 function binaryPathForProvider(

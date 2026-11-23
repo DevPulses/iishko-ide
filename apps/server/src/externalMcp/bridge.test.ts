@@ -161,7 +161,7 @@ describe("external MCP stdio bridge", () => {
     expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/No running IISHKO instance/);
     writeRuntime(baseDir, "userdata", 3773);
     writeRuntime(baseDir, "dev", 4773);
-    expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/Multiple running Iishko instances/);
+    expect(() => discoverExternalMcpRuntime(baseDir)).toThrow(/Multiple running IISHKO instances/);
   });
 
   it.skipIf(process.platform === "win32")(

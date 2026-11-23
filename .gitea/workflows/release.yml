@@ -8,6 +8,12 @@
 # Upload order matters: the update feed pulls the newest release every few
 # minutes and requires every file a manifest names to already be an asset,
 # so binaries go first and the yml manifests + SHA256SUMS.txt last.
+#
+# Safety: the first step after checkout refuses to rebuild a tag whose
+# release already carries both update manifests, so manually published
+# releases are never touched. Uploads go through multipart/form-data under
+# a "<name>.new" staging asset, are size-verified, and only then replace the
+# previous asset — a failed upload never deletes what is already published.
 
 name: release
 
@@ -24,7 +30,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check whether this tag is already published
+        id: published-check
+        shell: pwsh
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $api = "https://git.reformboss.com/api/v1/repos/reform/iishko-ide"
+          $headers = @{ Authorization = "token $env:GITEA_TOKEN" }
+          $tag = $env:GITHUB_REF_NAME
+          if (-not $tag) { $tag = git describe --tags --exact-match HEAD }
+          $skip = "false"
+          $rel = Invoke-RestMethod -Uri "$api/releases/tags/$tag" -Headers $headers -ErrorAction SilentlyContinue
+          if ($rel) {
+            $ready = @($rel.assets | Where-Object {
+              $_.name -in @("iishko.yml", "iishko-linux.yml") -and $_.size -gt 0
+            })
+            if ($ready.Count -ge 2) {
+              $skip = "true"
+              Write-Host "Release $tag already carries both update manifests; skipping the build so manual releases stay untouched."
+            }
+          }
+          "skip=$skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Ensure Bun 1.4.5
+        if: steps.published-check.outputs.skip != 'true'
         shell: pwsh
         run: |
           $bunVersion = "1.4.5"
@@ -45,23 +76,31 @@ jobs:
           bun --version
 
       - name: Install dependencies
+        if: steps.published-check.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Build workspace bundles
+        if: steps.published-check.outputs.skip != 'true'
         run: bunx turbo run build --filter=@iishko/desktop --filter=@iishko/cli
 
       - name: Build Windows NSIS
+        if: steps.published-check.outputs.skip != 'true'
         run: node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64
 
       - name: Build Linux AppImage in WSL
+        if: steps.published-check.outputs.skip != 'true'
         shell: pwsh
         run: |
           $win = $PWD.Path
           $wslRepo = "/mnt/" + $win.Substring(0,1).ToLower() + ($win.Substring(2) -replace '\\','/')
           $wslOut = "$wslRepo/release"
-          wsl.exe -e bash -lc "bash '$wslRepo/scripts/ci/build-appimage-wsl.sh' '$wslRepo' '$wslOut'"
+          # The pinned Cua Driver builds from source and needs the pinned Rust
+          # toolchain on PATH; the runner's WSL login shell does not add
+          # ~/.cargo/bin, so prepend it explicitly.
+          wsl.exe -e bash -lc "PATH=`$HOME/.cargo/bin:`$PATH bash '$wslRepo/scripts/ci/build-appimage-wsl.sh' '$wslRepo' '$wslOut'"
 
       - name: Collect artifacts and SHA256SUMS
+        if: steps.published-check.outputs.skip != 'true'
         shell: pwsh
         run: |
           $releaseDir = Join-Path $PWD.Path "release"
@@ -75,6 +114,7 @@ jobs:
           Get-ChildItem $releaseDir -File | Select-Object Name, Length
 
       - name: Create or update Gitea release
+        if: steps.published-check.outputs.skip != 'true'
         shell: pwsh
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
@@ -113,15 +153,26 @@ jobs:
           }
 
           foreach ($f in $upload) {
-            $assetName = [uri]::EscapeDataString($f.Name)
-            # Replace an existing asset with the same name, then upload.
-            $existing = Invoke-RestMethod -Uri "$api/repos/$repo/releases/$($rel.id)/assets" -Headers $headers -ErrorAction SilentlyContinue
-            foreach ($a in @($existing)) {
-              if ($a.name -eq $f.Name) {
-                Invoke-RestMethod -Method Delete -Uri "$api/repos/$repo/releases/assets/$($a.id)" -Headers $headers
-              }
+            $size = $f.Length
+            $stageName = "$($f.Name).new"
+            $stageEncoded = [uri]::EscapeDataString($stageName)
+            # Stale staging assets are ours from an interrupted run; drop them
+            # before uploading so the staging name stays unique.
+            foreach ($a in @($rel.assets | Where-Object { $_.name -eq $stageName })) {
+              Invoke-RestMethod -Method Delete -Uri "$api/repos/$repo/releases/$($rel.id)/assets/$($a.id)" -Headers $headers
             }
-            Invoke-RestMethod -Method Post -Uri "$api/repos/$repo/releases/$($rel.id)/assets?name=$assetName" -Headers $headers -InFile $f.FullName -ContentType "application/octet-stream"
-            Write-Host "uploaded $($f.Name) ($($f.Length) bytes)"
+            # Multipart upload: a raw octet-stream body creates 0-byte assets
+            # on this Gitea, so the file goes in the `attachment` form field.
+            $resp = Invoke-RestMethod -Method Post -Uri "$api/repos/$repo/releases/$($rel.id)/assets?name=$stageEncoded" -Headers $headers -Form @{ attachment = Get-Item $f.FullName }
+            if ($resp.size -ne $size) {
+              throw "Upload size mismatch for $($f.Name): remote=$($resp.size) local=$size"
+            }
+            # The replacement is verified: only now retire the published asset
+            # and rename the staged one into place.
+            foreach ($a in @($rel.assets | Where-Object { $_.name -eq $f.Name })) {
+              Invoke-RestMethod -Method Delete -Uri "$api/repos/$repo/releases/$($rel.id)/assets/$($a.id)" -Headers $headers
+            }
+            Invoke-RestMethod -Method Patch -Uri "$api/repos/$repo/releases/$($rel.id)/assets/$($resp.id)" -Headers $headers -ContentType "application/json" -Body (@{ name = $f.Name } | ConvertTo-Json)
+            Write-Host "uploaded $($f.Name) ($size bytes)"
           }
           Write-Host "release $($rel.html_url) ready"
